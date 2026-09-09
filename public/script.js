@@ -137,41 +137,59 @@ async function loadBackups() {
   }
 }
 
-async function loadAddons() {
+let lastAddonsData = null;
+
+function renderAddonLists() {
+  if (!lastAddonsData) return;
+  const showSystem = document.getElementById('showSystemPacks').checked;
   const resContainer = document.getElementById('resourcePacksList');
   const behContainer = document.getElementById('behaviorPacksList');
-  try {
-    const data = await api('/api/addons');
-    const render = (list, type) => {
-      if (list.length === 0) return '<p class="muted">Ninguno instalado.</p>';
-      return list
-        .map((p) => {
-          const versionText = Array.isArray(p.version) ? p.version.join('.') : String(p.version || '?');
-          return `
-        <div class="list-item">
-          <div>
-            ${p.name} ${p.appliedToWorld ? '<span class="tag">Aplicado al mundo</span>' : ''}
-            <div class="meta">v${versionText} · ${p.description || ''}</div>
-          </div>
-          <button class="icon-btn" data-type="${type}" data-folder="${p.folder}">Eliminar</button>
-        </div>`;
-        })
-        .join('');
-    };
-    resContainer.innerHTML = render(data.resourcePacks, 'resources');
-    behContainer.innerHTML = render(data.behaviorPacks, 'behavior');
 
-    document.querySelectorAll('.icon-btn[data-folder]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('¿Eliminar este addon/texture pack?')) return;
-        await api(`/api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}`, { method: 'DELETE' });
-        loadAddons();
-      });
+  const render = (list, type) => {
+    const filtered = showSystem ? list : list.filter((p) => !p.builtIn);
+    if (filtered.length === 0) {
+      return showSystem || list.length === 0
+        ? '<p class="muted">Ninguno instalado.</p>'
+        : '<p class="muted">Solo hay paquetes del sistema instalados. Actívalos arriba para verlos.</p>';
+    }
+    return filtered
+      .map((p) => {
+        const versionText = Array.isArray(p.version) ? p.version.join('.') : String(p.version || '?');
+        return `
+      <div class="list-item">
+        <div>
+          ${p.name} ${p.appliedToWorld ? '<span class="tag">Aplicado al mundo</span>' : ''} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''}
+          <div class="meta">v${versionText} · ${p.description || ''}</div>
+        </div>
+        <button class="icon-btn" data-type="${type}" data-folder="${p.folder}">Eliminar</button>
+      </div>`;
+      })
+      .join('');
+  };
+
+  resContainer.innerHTML = render(lastAddonsData.resourcePacks, 'resources');
+  behContainer.innerHTML = render(lastAddonsData.behaviorPacks, 'behavior');
+
+  document.querySelectorAll('.icon-btn[data-folder]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar este addon/texture pack?')) return;
+      await api(`/api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}`, { method: 'DELETE' });
+      loadAddons();
     });
+  });
+}
+
+async function loadAddons() {
+  const resContainer = document.getElementById('resourcePacksList');
+  try {
+    lastAddonsData = await api('/api/addons');
+    renderAddonLists();
   } catch (e) {
     resContainer.textContent = e.message;
   }
 }
+
+document.getElementById('showSystemPacks').addEventListener('change', renderAddonLists);
 
 document.getElementById('formAddonUpload').addEventListener('submit', async (e) => {
   e.preventDefault();

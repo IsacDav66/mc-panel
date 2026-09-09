@@ -11,7 +11,7 @@ const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
 
-const PORT = process.env.PORT || 8081;
+const PORT = process.env.PORT || 8080;
 const BEDROCK_DIR = process.env.BEDROCK_DIR || '/home/ubuntu/bedrock-server';
 const PM2_NAME = process.env.PM2_PROCESS_NAME || 'minecraft-bedrock';
 const WORLDS_DIR = path.join(BEDROCK_DIR, 'worlds');
@@ -142,6 +142,61 @@ function normalizeVersion(v) {
   return [1, 0, 0];
 }
 
+function normalizeVersion(v) {
+  if (Array.isArray(v) && v.length > 0) return v.map((n) => Number(n) || 0);
+  if (typeof v === 'string') {
+    const parts = v.split('.').map((n) => Number(n) || 0);
+    return parts.length > 0 ? parts : [1, 0, 0];
+  }
+  if (typeof v === 'number') return [v, 0, 0];
+  return [1, 0, 0];
+}
+
+// Packs shipped by default inside the official Bedrock Dedicated Server download
+// (vanilla assets, level editor, chemistry, experimental features, etc).
+// We hide these by default since the user only cares about packs they installed themselves.
+const BUILTIN_FOLDER_PATTERN = /^(vanilla|chemistry|editor|experimental_|server_editor_library|server_ui_library|image_experiment|physics)/i;
+const BUILTIN_NAME_PATTERN = /^(resourcePack|behaviorPack)\./i;
+
+function isBuiltInPack(folderName, builtInByName) {
+  return BUILTIN_FOLDER_PATTERN.test(folderName) || builtInByName;
+}
+
+function loadLangMap(dir) {
+  const textsDir = path.join(dir, 'texts');
+  if (!fs.existsSync(textsDir)) return {};
+  const candidates = ['en_US.lang', 'en_GB.lang'];
+  let fileName = candidates.find((f) => fs.existsSync(path.join(textsDir, f)));
+  if (!fileName) {
+    const any = fs.readdirSync(textsDir).find((f) => f.endsWith('.lang'));
+    fileName = any;
+  }
+  if (!fileName) return {};
+  const map = {};
+  try {
+    const raw = fs.readFileSync(path.join(textsDir, fileName), 'utf8');
+    raw.split('\n').forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('##') || trimmed.startsWith('#')) return;
+      const idx = trimmed.indexOf('=');
+      if (idx === -1) return;
+      map[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
+    });
+  } catch (e) {
+    // ignore malformed lang files
+  }
+  return map;
+}
+
+function looksLikeTranslationKey(value) {
+  return typeof value === 'string' && /^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)+$/.test(value);
+}
+
+function resolveText(rawValue, langMap) {
+  if (looksLikeTranslationKey(rawValue) && langMap[rawValue]) return langMap[rawValue];
+  return rawValue;
+}
+
 function readManifest(dir) {
   const manifestPath = path.join(dir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) return null;
@@ -149,13 +204,17 @@ function readManifest(dir) {
     const data = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const headerUuid = data.header && data.header.uuid;
     const headerVersion = normalizeVersion(data.header && data.header.version);
-    const name = (data.header && data.header.name) || path.basename(dir);
-    const description = (data.header && data.header.description) || '';
+    const langMap = loadLangMap(dir);
+    const rawName = (data.header && data.header.name) || path.basename(dir);
+    const rawDescription = (data.header && data.header.description) || '';
+    const name = resolveText(rawName, langMap);
+    const description = resolveText(rawDescription, langMap);
     const modules = data.modules || [];
     let type = 'resources';
     if (modules.some((m) => m.type === 'data')) type = 'behavior';
     else if (modules.some((m) => m.type === 'resources')) type = 'resources';
-    return { uuid: headerUuid, version: headerVersion, name, description, type };
+    const builtInByName = BUILTIN_NAME_PATTERN.test(rawName || '');
+    return { uuid: headerUuid, version: headerVersion, name, description, type, builtInByName };
   } catch (e) {
     return null;
   }
@@ -169,7 +228,9 @@ function listInstalledPacks(baseDir) {
       const dir = path.join(baseDir, e.name);
       const manifest = readManifest(dir);
       if (!manifest) return null;
-      return { folder: e.name, ...manifest };
+      const builtIn = isBuiltInPack(e.name, manifest.builtInByName);
+      const { builtInByName, ...rest } = manifest;
+      return { folder: e.name, builtIn, ...rest };
     })
     .filter(Boolean);
 }

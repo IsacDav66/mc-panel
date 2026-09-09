@@ -109,6 +109,16 @@ input[type="file"] {
 
 .list { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+
 .list-item {
   display: flex;
   justify-content: space-between;
@@ -129,6 +139,11 @@ input[type="file"] {
   background: rgba(79,140,255,0.15);
   color: var(--blue);
   margin-left: 6px;
+}
+
+.tag-system {
+  background: rgba(139,152,172,0.15);
+  color: var(--muted);
 }
 
 .icon-btn {
