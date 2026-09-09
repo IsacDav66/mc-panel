@@ -145,16 +145,17 @@ async function loadAddons() {
     const render = (list, type) => {
       if (list.length === 0) return '<p class="muted">Ninguno instalado.</p>';
       return list
-        .map(
-          (p) => `
+        .map((p) => {
+          const versionText = Array.isArray(p.version) ? p.version.join('.') : String(p.version || '?');
+          return `
         <div class="list-item">
           <div>
             ${p.name} ${p.appliedToWorld ? '<span class="tag">Aplicado al mundo</span>' : ''}
-            <div class="meta">v${p.version.join('.')} · ${p.description || ''}</div>
+            <div class="meta">v${versionText} · ${p.description || ''}</div>
           </div>
           <button class="icon-btn" data-type="${type}" data-folder="${p.folder}">Eliminar</button>
-        </div>`
-        )
+        </div>`;
+        })
         .join('');
     };
     resContainer.innerHTML = render(data.resourcePacks, 'resources');

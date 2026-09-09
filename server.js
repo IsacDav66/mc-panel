@@ -132,13 +132,23 @@ function timestamp() {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+function normalizeVersion(v) {
+  if (Array.isArray(v) && v.length > 0) return v.map((n) => Number(n) || 0);
+  if (typeof v === 'string') {
+    const parts = v.split('.').map((n) => Number(n) || 0);
+    return parts.length > 0 ? parts : [1, 0, 0];
+  }
+  if (typeof v === 'number') return [v, 0, 0];
+  return [1, 0, 0];
+}
+
 function readManifest(dir) {
   const manifestPath = path.join(dir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) return null;
   try {
     const data = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const headerUuid = data.header && data.header.uuid;
-    const headerVersion = (data.header && data.header.version) || [1, 0, 0];
+    const headerVersion = normalizeVersion(data.header && data.header.version);
     const name = (data.header && data.header.name) || path.basename(dir);
     const description = (data.header && data.header.description) || '';
     const modules = data.modules || [];
