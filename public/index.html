@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Panel — Bedrock Server</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <h1>⛏️ Panel del Servidor Bedrock</h1>
+    <div id="statusPill" class="pill pill-unknown">Cargando…</div>
+  </header>
+
+  <main class="grid">
+
+    <section class="card">
+      <h2>Servidor</h2>
+      <div id="statusDetails" class="status-details">—</div>
+      <div class="button-row">
+        <button id="btnStart" class="btn btn-green">Iniciar</button>
+        <button id="btnRestart" class="btn btn-blue">Reiniciar</button>
+        <button id="btnStop" class="btn btn-red">Detener</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Mundo actual</h2>
+      <p class="muted" id="worldName">—</p>
+      <div class="button-row">
+        <button id="btnDownloadWorld" class="btn btn-blue">Descargar copia (.mcworld)</button>
+      </div>
+      <hr />
+      <h3>Reemplazar mundo</h3>
+      <p class="muted">Esto detiene el servidor, hace un backup automático del mundo actual, y lo reemplaza por el archivo que subas (.mcworld o .zip).</p>
+      <form id="formWorldUpload" class="upload-form">
+        <input type="file" id="worldFile" accept=".mcworld,.zip" required />
+        <button type="submit" class="btn btn-orange">Reemplazar mundo</button>
+      </form>
+      <div id="worldUploadMsg" class="msg"></div>
+    </section>
+
+    <section class="card">
+      <h2>Backups</h2>
+      <div id="backupsList" class="list">Cargando…</div>
+    </section>
+
+    <section class="card card-wide">
+      <h2>Addons y Texture Packs</h2>
+      <p class="muted">Sube un archivo .mcpack o .mcaddon para instalarlo. Se aplica automáticamente al mundo actual.</p>
+      <form id="formAddonUpload" class="upload-form">
+        <input type="file" id="addonFile" accept=".mcpack,.mcaddon,.zip" required />
+        <button type="submit" class="btn btn-orange">Instalar addon</button>
+      </form>
+      <div id="addonUploadMsg" class="msg"></div>
+
+      <div class="two-col">
+        <div>
+          <h3>Resource Packs (texturas)</h3>
+          <div id="resourcePacksList" class="list">Cargando…</div>
+        </div>
+        <div>
+          <h3>Behavior Packs (addons)</h3>
+          <div id="behaviorPacksList" class="list">Cargando…</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

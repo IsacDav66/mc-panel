@@ -1,0 +1,17 @@
+{
+  "name": "mc-bedrock-panel",
+  "version": "1.0.0",
+  "description": "Panel web para administrar un Bedrock Dedicated Server (mundo, addons, backups)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-basic-auth": "^1.2.1",
+    "multer": "^1.4.5-lts.1"
+  }
+}
