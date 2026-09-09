@@ -11,7 +11,7 @@ const archiver = require('archiver');
 const AdmZip = require('adm-zip');
 const crypto = require('crypto');
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8081;
 const BEDROCK_DIR = process.env.BEDROCK_DIR || '/home/ubuntu/bedrock-server';
 const PM2_NAME = process.env.PM2_PROCESS_NAME || 'minecraft-bedrock';
 const WORLDS_DIR = path.join(BEDROCK_DIR, 'worlds');
