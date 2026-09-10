@@ -236,7 +236,15 @@ function readManifest(dir) {
   const manifestPath = path.join(dir, 'manifest.json');
   if (!fs.existsSync(manifestPath)) return null;
   try {
-    const data = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    let raw = fs.readFileSync(manifestPath, 'utf8');
+
+    // Quitar BOM UTF-8 (los packs del sistema del BDS lo llevan)
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    // Quitar BOM UTF-16 si por lo que sea llega así
+    raw = raw.replace(/^\uFEFF/, '').trim();
+
+    const data = JSON.parse(raw);
+
     const headerUuid = data.header && data.header.uuid;
     const headerVersion = normalizeVersion(data.header && data.header.version);
     const minEngineVersion = Array.isArray(data.header && data.header.min_engine_version)
@@ -278,27 +286,30 @@ function readManifest(dir) {
 function listInstalledPacks(baseDir) {
   if (!fs.existsSync(baseDir)) return [];
   const entries = fs.readdirSync(baseDir, { withFileTypes: true }).filter((e) => e.isDirectory());
-  return entries
-    .map((e) => {
-      const dir = path.join(baseDir, e.name);
-      const manifest = readManifest(dir);
-      if (!manifest) {
-        // Antes se filtraba en silencio. Ahora aparece igualmente con un flag.
-        return {
-          folder: e.name,
-          builtIn: false,
-          uuid: null,
-          name: e.name,
-          description: 'manifest.json ilegible o ausente',
-          version: null,
-          type: null,
-          broken: true,
-        };
-      }
-      const builtIn = isBuiltInPack(e.name, manifest.builtInByName);
-      const { builtInByName, ...rest } = manifest;
-      return { folder: e.name, builtIn, ...rest };
-    });
+  return entries.map((e) => {
+    const dir = path.join(baseDir, e.name);
+    const manifest = readManifest(dir);
+    const builtInByFolder = BUILTIN_FOLDER_PATTERN.test(e.name);
+
+    if (!manifest) {
+      // Aunque no podamos leer el manifest, seguimos marcando builtIn correctamente
+      // según el nombre de la carpeta, para que el filtro funcione.
+      return {
+        folder: e.name,
+        builtIn: builtInByFolder,
+        uuid: null,
+        name: e.name,
+        description: 'manifest.json ilegible o ausente',
+        version: null,
+        type: null,
+        broken: true,
+      };
+    }
+
+    const builtIn = builtInByFolder || isBuiltInPack(e.name, manifest.builtInByName);
+    const { builtInByName, ...rest } = manifest;
+    return { folder: e.name, builtIn, ...rest };
+  });
 }
 
 function readWorldPackList(fileName) {
