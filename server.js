@@ -35,7 +35,6 @@ fs.mkdirSync(RESOURCE_PACKS_DIR, { recursive: true });
 fs.mkdirSync(BEHAVIOR_PACKS_DIR, { recursive: true });
 fs.mkdirSync(PANEL_DATA_DIR, { recursive: true });
 
-// A simple in-memory lock so two operations don't collide (e.g. two uploads at once)
 let busy = false;
 let pendingRestart = false;
 
@@ -55,9 +54,9 @@ function withLock(res, fn) {
     });
 }
 
-// ---------- async job tracker (para operaciones largas que causarían 504) ----------
+// ---------- async job tracker ----------
 const jobs = new Map();
-const JOB_TTL_MS = 10 * 60 * 1000; // limpiar jobs viejos tras 10 min
+const JOB_TTL_MS = 10 * 60 * 1000;
 
 function createJob() {
   const id = crypto.randomUUID();
@@ -75,7 +74,7 @@ function createJob() {
 
 const upload = multer({
   dest: UPLOAD_TMP,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
+  limits: { fileSize: 500 * 1024 * 1024 },
 });
 
 const app = express();
@@ -106,7 +105,6 @@ function readProperties() {
   return props;
 }
 
-// Update server.properties in-place, keeping comments and order.
 function updateProperties(updates) {
   const raw = fs.readFileSync(PROPERTIES_FILE, 'utf8');
   const lines = raw.split('\n');
@@ -194,9 +192,6 @@ function normalizeVersion(v) {
   return [1, 0, 0];
 }
 
-// Packs shipped by default inside the official Bedrock Dedicated Server download
-// (vanilla assets, level editor, chemistry, experimental features, etc).
-// We hide these by default since the user only cares about packs they installed themselves.
 const BUILTIN_FOLDER_PATTERN = /^(vanilla|chemistry|editor|experimental_|server_editor_library|server_ui_library|image_experiment|physics)/i;
 const BUILTIN_NAME_PATTERN = /^(resourcePack|behaviorPack)\./i;
 
@@ -224,9 +219,7 @@ function loadLangMap(dir) {
       if (idx === -1) return;
       map[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
     });
-  } catch (e) {
-    // ignore malformed lang files
-  }
+  } catch (e) {}
   return map;
 }
 
@@ -246,17 +239,37 @@ function readManifest(dir) {
     const data = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const headerUuid = data.header && data.header.uuid;
     const headerVersion = normalizeVersion(data.header && data.header.version);
+    const minEngineVersion = Array.isArray(data.header && data.header.min_engine_version)
+      ? data.header.min_engine_version
+      : null;
     const langMap = loadLangMap(dir);
     const rawName = (data.header && data.header.name) || path.basename(dir);
     const rawDescription = (data.header && data.header.description) || '';
     const name = resolveText(rawName, langMap);
     const description = resolveText(rawDescription, langMap);
+
     const modules = data.modules || [];
     let type = 'resources';
     if (modules.some((m) => m.type === 'data')) type = 'behavior';
     else if (modules.some((m) => m.type === 'resources')) type = 'resources';
+
+    const hasScripts = modules.some((m) => m.type === 'script');
+    const scriptDeps = (data.dependencies || [])
+      .filter((d) => d.module_name)
+      .map((d) => `${d.module_name}@${d.version}`);
+
     const builtInByName = BUILTIN_NAME_PATTERN.test(rawName || '');
-    return { uuid: headerUuid, version: headerVersion, name, description, type, builtInByName };
+    return {
+      uuid: headerUuid,
+      version: headerVersion,
+      name,
+      description,
+      type,
+      builtInByName,
+      minEngineVersion,
+      hasScripts,
+      scriptDeps,
+    };
   } catch (e) {
     return null;
   }
@@ -269,12 +282,23 @@ function listInstalledPacks(baseDir) {
     .map((e) => {
       const dir = path.join(baseDir, e.name);
       const manifest = readManifest(dir);
-      if (!manifest) return null;
+      if (!manifest) {
+        // Antes se filtraba en silencio. Ahora aparece igualmente con un flag.
+        return {
+          folder: e.name,
+          builtIn: false,
+          uuid: null,
+          name: e.name,
+          description: 'manifest.json ilegible o ausente',
+          version: null,
+          type: null,
+          broken: true,
+        };
+      }
       const builtIn = isBuiltInPack(e.name, manifest.builtInByName);
       const { builtInByName, ...rest } = manifest;
       return { folder: e.name, builtIn, ...rest };
-    })
-    .filter(Boolean);
+    });
 }
 
 function readWorldPackList(fileName) {
@@ -294,8 +318,6 @@ function writeWorldPackList(fileName, list) {
   fs.writeFileSync(filePath, JSON.stringify(list, null, 2));
 }
 
-// ---------- helpers: generic JSON read/write ----------
-
 function readJson(filePath, defaultValue) {
   if (!fs.existsSync(filePath)) return defaultValue;
   try {
@@ -308,8 +330,6 @@ function readJson(filePath, defaultValue) {
 function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
-
-// ---------- helpers: console / FIFO ----------
 
 function getPm2LogPaths() {
   const proc = findPm2Process();
@@ -332,17 +352,14 @@ function tailFile(filePath, lines) {
 function sendConsoleCommand(command) {
   if (!fs.existsSync(CONSOLE_FIFO)) {
     throw new Error(
-      'No se encontró el FIFO de consola (console.fifo). El servidor debe arrancar con el script start.sh para poder recibir comandos — revisa la guía de instalación de la consola.'
+      'No se encontró el FIFO de consola (console.fifo). El servidor debe arrancar con el script start.sh para poder recibir comandos.'
     );
   }
-  // Writing to a FIFO that already has a reader open (see start.sh) is non-blocking.
   fs.appendFileSync(CONSOLE_FIFO, command.trim() + '\n');
 }
 
-// ---------- helpers: player tracking ----------
-
 let onlineSet = new Set();
-let logReadOffset = null; // set on first poll to current EOF, so we don't replay old history
+let logReadOffset = null;
 
 function loadPlayers() {
   return readJson(PLAYERS_FILE, {});
@@ -364,7 +381,7 @@ function touchPlayer(name, xuid, isOnline) {
   const key = xuid || name;
   const now = new Date().toISOString();
   const existing = players[key] || { name, xuid: xuid || null, firstSeen: now };
-  existing.name = name; // keep latest-seen casing/name
+  existing.name = name;
   existing.lastSeen = now;
   existing.online = isOnline;
   players[key] = existing;
@@ -383,15 +400,11 @@ function pollServerLog() {
   }
 
   if (logReadOffset === null) {
-    // First run: don't replay the entire historical log, just start tracking from now.
     logReadOffset = size;
     return;
   }
 
-  if (size < logReadOffset) {
-    // Log file was rotated/truncated.
-    logReadOffset = 0;
-  }
+  if (size < logReadOffset) logReadOffset = 0;
   if (size === logReadOffset) return;
 
   const fd = fs.openSync(logPaths.out, 'r');
@@ -442,6 +455,38 @@ function getLastActivity() {
   return timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
 }
 
+// ---------- updater helpers ----------
+
+async function getLatestBedrockDownload() {
+  const res = await fetch('https://net-secondary.web.minecraft-services.net/api/v1.0/download/links');
+  if (!res.ok) throw new Error('No se pudo consultar la API de descargas de Mojang.');
+  const data = await res.json();
+  const links = data.result?.links || [];
+  const linuxLink = links.find((l) => l.downloadType === 'serverBedrockLinux');
+  if (!linuxLink) throw new Error('No se encontró el enlace de descarga para Linux.');
+  const url = linuxLink.downloadUrl;
+  const match = url.match(/bedrock-server-([\d.]+)\.zip/);
+  const version = match ? match[1] : 'desconocida';
+  return { url, version };
+}
+
+function getCurrentBedrockVersion() {
+  const versionFile = path.join(BEDROCK_DIR, 'version.json');
+  if (fs.existsSync(versionFile)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+      return data.version || data.serverVersion || null;
+    } catch (e) {}
+  }
+  try {
+    const out = execSync(`strings "${path.join(BEDROCK_DIR, 'bedrock_server')}" | grep -m1 "v[0-9]"`, { encoding: 'utf8' });
+    const match = out.match(/v([\d.]+)/);
+    return match ? match[1] : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ---------- routes: status & server control ----------
 
 app.get('/api/status', (req, res) => {
@@ -475,7 +520,6 @@ app.post('/api/server/:action', (req, res) => {
   });
 });
 
-// Current server.properties (used to prefill the "create world" form)
 app.get('/api/server/properties', (req, res) => {
   try {
     const props = readProperties();
@@ -490,6 +534,138 @@ app.get('/api/server/properties', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ---------- routes: updater ----------
+
+// Cache para no golpear la API de Mojang en cada carga del panel
+let updateCheckCache = { data: null, timestamp: 0 };
+const UPDATE_CACHE_TTL = 60 * 60 * 1000; // 1 hora
+
+app.get('/api/server/update/check', async (req, res) => {
+  try {
+    const forceRefresh = req.query.force === '1';
+    const now = Date.now();
+
+    if (!forceRefresh && updateCheckCache.data && now - updateCheckCache.timestamp < UPDATE_CACHE_TTL) {
+      return res.json(updateCheckCache.data);
+    }
+
+    const current = getCurrentBedrockVersion();
+    const latest = await getLatestBedrockDownload();
+    const updateAvailable = !current || current !== latest.version;
+    const data = { current, latest: latest.version, updateAvailable, downloadUrl: latest.url, checkedAt: now };
+
+    updateCheckCache = { data, timestamp: now };
+    res.json(data);
+  } catch (e) {
+    if (updateCheckCache.data) return res.json(updateCheckCache.data);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/server/update', (req, res) => {
+  if (busy) {
+    return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
+  }
+
+  busy = true;
+  const jobId = createJob();
+  const job = jobs.get(jobId);
+
+  res.json({ ok: true, jobId });
+
+  (async () => {
+    const updateTmpDir = path.join(UPLOAD_TMP, `bedrock-update-${timestamp()}`);
+    try {
+      job.meta.message = 'Consultando la última versión…';
+      const latest = await getLatestBedrockDownload();
+      job.meta.latestVersion = latest.version;
+
+      job.meta.message = 'Deteniendo servidor…';
+      let wasRunning = false;
+      const proc = findPm2Process();
+      if (proc && proc.pm2_env.status === 'online') {
+        wasRunning = true;
+        pm2Action('stop');
+        await sleep(2000);
+      }
+
+      job.meta.message = 'Creando backup de seguridad…';
+      const backupZip = path.join(BACKUPS_DIR, `pre-update-${timestamp()}.zip`);
+      await zipDirToFile(BEDROCK_DIR, backupZip);
+
+      job.meta.message = `Descargando versión ${latest.version}…`;
+      const zipPath = path.join(updateTmpDir, 'bedrock-server.zip');
+      await fsp.mkdir(updateTmpDir, { recursive: true });
+      const downloadRes = await fetch(latest.url);
+      if (!downloadRes.ok) throw new Error('Error al descargar el servidor.');
+      const fileStream = fs.createWriteStream(zipPath);
+      await new Promise((resolve, reject) => {
+        downloadRes.body.pipe(fileStream);
+        downloadRes.body.on('error', reject);
+        fileStream.on('finish', resolve);
+      });
+
+      job.meta.message = 'Extrayendo nueva versión…';
+      const extractDir = path.join(updateTmpDir, 'extracted');
+      await fsp.mkdir(extractDir, { recursive: true });
+      const zip = new AdmZip(zipPath);
+      zip.extractAllTo(extractDir, true);
+
+      job.meta.message = 'Instalando nueva versión…';
+      const preserve = [
+        'server.properties',
+        'allowlist.json',
+        'permissions.json',
+        'banned-players.json',
+        'worlds',
+        'resource_packs',
+        'behavior_packs',
+        'console.fifo',
+      ];
+      const preserveTmp = path.join(updateTmpDir, 'preserve');
+      await fsp.mkdir(preserveTmp, { recursive: true });
+      for (const item of preserve) {
+        const src = path.join(BEDROCK_DIR, item);
+        if (fs.existsSync(src)) {
+          await fsp.rename(src, path.join(preserveTmp, item));
+        }
+      }
+      const entries = await fsp.readdir(BEDROCK_DIR);
+      for (const entry of entries) {
+        if (entry === 'panel-backups' || entry === 'panel-data') continue;
+        await rmrf(path.join(BEDROCK_DIR, entry));
+      }
+      await fsp.cp(extractDir, BEDROCK_DIR, { recursive: true });
+      for (const item of preserve) {
+        const src = path.join(preserveTmp, item);
+        if (fs.existsSync(src)) {
+          await fsp.rename(src, path.join(BEDROCK_DIR, item));
+        }
+      }
+
+      await rmrf(updateTmpDir);
+
+      if (wasRunning) {
+        job.meta.message = 'Reiniciando servidor…';
+        pm2Action('start');
+      }
+      pendingRestart = false;
+
+      job.status = 'done';
+      job.finishedAt = Date.now();
+      job.meta.message = `Actualizado a la versión ${latest.version}.`;
+    } catch (err) {
+      console.error('Error en /api/server/update:', err);
+      job.status = 'error';
+      job.error = err.message || String(err);
+      job.finishedAt = Date.now();
+      await rmrf(updateTmpDir);
+    } finally {
+      busy = false;
+    }
+  })();
 });
 
 // ---------- jobs ----------
@@ -525,13 +701,11 @@ app.post('/api/world/upload', upload.single('worldfile'), (req, res) => {
     const uploadedPath = req.file.path;
     const worldPath = getCurrentWorldPath();
 
-    // 1. Backup current world
     if (fs.existsSync(worldPath)) {
       const backupZip = path.join(BACKUPS_DIR, `world-backup-${timestamp()}.zip`);
       await zipDirToFile(worldPath, backupZip);
     }
 
-    // 2. Stop server
     let wasRunning = false;
     const proc = findPm2Process();
     if (proc && proc.pm2_env.status === 'online') {
@@ -541,13 +715,11 @@ app.post('/api/world/upload', upload.single('worldfile'), (req, res) => {
     }
 
     try {
-      // 3. Replace world contents
       await rmrf(worldPath);
       await fsp.mkdir(worldPath, { recursive: true });
       const zip = new AdmZip(uploadedPath);
       zip.extractAllTo(worldPath, true);
 
-      // Handle case where the zip has a single top-level folder wrapping the world
       const items = fs.readdirSync(worldPath);
       if (items.length === 1) {
         const onlyItem = path.join(worldPath, items[0]);
@@ -562,22 +734,11 @@ app.post('/api/world/upload', upload.single('worldfile'), (req, res) => {
       await rmrf(uploadedPath);
     }
 
-    // 4. Restart server if it was running
-    if (wasRunning) {
-      pm2Action('start');
-    }
-
+    if (wasRunning) pm2Action('start');
     res.json({ ok: true });
   });
 });
 
-// Create a brand-new world from scratch with custom settings.
-// Flow: backup current world → stop → update server.properties → delete old
-// world folder(s) → start (server auto-generates a fresh world on boot).
-//
-// IMPORTANTE: esta operación puede tardar minutos (zipear el mundo, pm2 stop/start).
-// Para evitar 504 del reverse proxy, devolvemos un jobId inmediatamente y el
-// trabajo pesado se ejecuta en background. El cliente consulta /api/jobs/:id.
 app.post('/api/world/create', (req, res) => {
   if (busy) {
     return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
@@ -592,7 +753,6 @@ app.post('/api/world/create', (req, res) => {
     playerPermission = 'member',
   } = req.body || {};
 
-  // Validaciones rápidas — así el usuario ve errores sin esperar.
   if (!worldName || !String(worldName).trim()) {
     return res.status(400).json({ error: 'El nombre del mundo es obligatorio.' });
   }
@@ -612,22 +772,18 @@ app.post('/api/world/create', (req, res) => {
   const job = jobs.get(jobId);
   job.meta = { worldName: newName };
 
-  // Responder YA — el proxy no se queda esperando.
   res.json({ ok: true, jobId, worldName: newName });
 
-  // Y hacer el trabajo pesado en background.
   (async () => {
     try {
       const oldWorldPath = getCurrentWorldPath();
       const newWorldPath = path.join(WORLDS_DIR, newName);
 
-      // 1. Backup current world
       if (fs.existsSync(oldWorldPath)) {
         const backupZip = path.join(BACKUPS_DIR, `world-backup-${timestamp()}.zip`);
         await zipDirToFile(oldWorldPath, backupZip);
       }
 
-      // 2. Stop server
       let wasRunning = false;
       const proc = findPm2Process();
       if (proc && proc.pm2_env.status === 'online') {
@@ -636,7 +792,6 @@ app.post('/api/world/create', (req, res) => {
         await sleep(1500);
       }
 
-      // 3. Update server.properties
       updateProperties({
         'level-name': newName,
         'gamemode': gamemode,
@@ -646,8 +801,6 @@ app.post('/api/world/create', (req, res) => {
         'level-seed': seed && String(seed).trim() !== '' ? String(seed).trim() : '',
       });
 
-      // 4. Remove old folders so BDS generates fresh ones on boot.
-      // If target is a different folder that already exists, back it up first.
       if (newWorldPath !== oldWorldPath && fs.existsSync(newWorldPath)) {
         const backupZip = path.join(BACKUPS_DIR, `world-backup-${newName}-${timestamp()}.zip`);
         await zipDirToFile(newWorldPath, backupZip);
@@ -655,7 +808,6 @@ app.post('/api/world/create', (req, res) => {
       }
       await rmrf(oldWorldPath);
 
-      // 5. Start server (fresh world is generated on startup)
       if (wasRunning) pm2Action('start');
       pendingRestart = false;
 
@@ -699,7 +851,7 @@ app.delete('/api/backups/:file', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- routes: addons / texture packs ----------
+// ---------- routes: addons ----------
 
 app.get('/api/addons', (req, res) => {
   const globalResourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR).map((p) => ({ ...p, location: 'global' }));
@@ -709,7 +861,7 @@ app.get('/api/addons', (req, res) => {
   const worldResourcePacks = listInstalledPacks(path.join(worldPath, 'resource_packs')).map((p) => ({
     ...p,
     location: 'world',
-    builtIn: false, // packs embedded in a world are never the server's built-in vanilla packs
+    builtIn: false,
   }));
   const worldBehaviorPacks = listInstalledPacks(path.join(worldPath, 'behavior_packs')).map((p) => ({
     ...p,
@@ -727,10 +879,10 @@ app.get('/api/addons', (req, res) => {
   const withApplied = (list, set, orderMap, total) =>
     list.map((p) => ({
       ...p,
-      appliedToWorld: set.has(p.uuid),
-      order: orderMap.has(p.uuid) ? orderMap.get(p.uuid) : null,
-      isFirst: orderMap.get(p.uuid) === 0,
-      isLast: orderMap.get(p.uuid) === total - 1,
+      appliedToWorld: p.uuid ? set.has(p.uuid) : false,
+      order: p.uuid && orderMap.has(p.uuid) ? orderMap.get(p.uuid) : null,
+      isFirst: p.uuid && orderMap.get(p.uuid) === 0,
+      isLast: p.uuid && orderMap.get(p.uuid) === total - 1,
     }));
 
   res.json({
@@ -756,16 +908,23 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
     zip.extractAllTo(extractTmp, true);
     await rmrf(uploadedPath);
 
-    // Find every manifest.json inside (handles both .mcpack single-pack and .mcaddon multi-pack)
+    // Buscar TODOS los manifest.json (incluido el root, por si el .mcaddon
+    // no envuelve el pack en una subcarpeta).
     const manifestDirs = [];
     function walk(dir) {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (e) {
+        return;
+      }
       if (entries.some((e) => e.isFile() && e.name === 'manifest.json')) {
         manifestDirs.push(dir);
-        return; // don't descend further into a pack we already found
       }
       for (const e of entries) {
-        if (e.isDirectory()) walk(path.join(dir, e.name));
+        if (e.isDirectory() && !e.name.startsWith('.')) {
+          walk(path.join(dir, e.name));
+        }
       }
     }
     walk(extractTmp);
@@ -776,28 +935,75 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
     }
 
     const installed = [];
-    for (const dir of manifestDirs) {
+    const skipped = [];
+
+    // Ordenar: primero resources, luego behavior (por dependencias cruzadas)
+    const ordered = [...manifestDirs].sort((a, b) => {
+      const ma = readManifest(a);
+      const mb = readManifest(b);
+      const order = { resources: 0, behavior: 1 };
+      return (order[ma?.type] ?? 0) - (order[mb?.type] ?? 0);
+    });
+
+    for (const dir of ordered) {
       const manifest = readManifest(dir);
-      if (!manifest || !manifest.uuid) continue;
+
+      if (!manifest) {
+        skipped.push({ dir: path.relative(extractTmp, dir) || '.', reason: 'manifest.json ilegible' });
+        continue;
+      }
+      if (!manifest.uuid) {
+        skipped.push({ dir: path.relative(extractTmp, dir) || '.', reason: 'falta header.uuid' });
+        continue;
+      }
+
       const targetBase = manifest.type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
       const folderName = `${manifest.name.replace(/[^a-z0-9_\-]/gi, '_')}-${manifest.uuid}`;
       const targetDir = path.join(targetBase, folderName);
-      await rmrf(targetDir);
-      await fsp.rename(dir, targetDir);
 
-      // Apply to current world automatically
+      try {
+        await rmrf(targetDir);
+
+        // ⚠️ IMPORTANTE: copiar en lugar de renombrar (evita EXDEV entre /tmp y el disco).
+        await fsp.cp(dir, targetDir, { recursive: true, force: true });
+        await rmrf(dir);
+      } catch (e) {
+        skipped.push({
+          dir: path.relative(extractTmp, dir) || '.',
+          reason: `no se pudo mover a ${manifest.type === 'behavior' ? 'behavior_packs' : 'resource_packs'}: ${e.message}`,
+        });
+        continue;
+      }
+
+      // Aplicar al mundo actual
       const listFile = manifest.type === 'behavior' ? 'world_behavior_packs.json' : 'world_resource_packs.json';
-      const list = readWorldPackList(listFile);
-      const filtered = list.filter((p) => p.pack_id !== manifest.uuid);
-      filtered.push({ pack_id: manifest.uuid, version: manifest.version });
-      writeWorldPackList(listFile, filtered);
+      try {
+        const list = readWorldPackList(listFile);
+        const filtered = list.filter((p) => p.pack_id !== manifest.uuid);
+        filtered.push({ pack_id: manifest.uuid, version: manifest.version });
+        writeWorldPackList(listFile, filtered);
+      } catch (e) {
+        skipped.push({
+          dir: path.relative(extractTmp, dir) || '.',
+          reason: `instalado pero no se pudo aplicar al mundo: ${e.message}`,
+        });
+        continue;
+      }
 
-      installed.push({ name: manifest.name, type: manifest.type, uuid: manifest.uuid });
+      installed.push({
+        name: manifest.name,
+        type: manifest.type,
+        uuid: manifest.uuid,
+        folder: folderName,
+        minEngineVersion: manifest.minEngineVersion,
+        hasScripts: manifest.hasScripts,
+      });
     }
 
     await rmrf(extractTmp);
-    pendingRestart = true;
-    res.json({ ok: true, installed });
+    if (installed.length > 0) pendingRestart = true;
+
+    res.json({ ok: true, installed, skipped });
   });
 });
 
@@ -830,7 +1036,6 @@ app.delete('/api/addons/:type/:folder', (req, res) => {
   });
 });
 
-// Enable/disable a pack for the current world without deleting it from disk.
 app.post('/api/addons/:type/:folder/toggle', (req, res) => {
   withLock(res, async () => {
     const { type, folder } = req.params;
@@ -852,16 +1057,13 @@ app.post('/api/addons/:type/:folder/toggle', (req, res) => {
     const list = readWorldPackList(listFile);
     const withoutThis = list.filter((p) => p.pack_id !== manifest.uuid);
 
-    if (enabled) {
-      withoutThis.push({ pack_id: manifest.uuid, version: manifest.version });
-    }
+    if (enabled) withoutThis.push({ pack_id: manifest.uuid, version: manifest.version });
     writeWorldPackList(listFile, withoutThis);
     pendingRestart = true;
     res.json({ ok: true });
   });
 });
 
-// Move a pack up/down in priority order within the current world's pack list.
 app.post('/api/addons/:type/reorder', (req, res) => {
   withLock(res, async () => {
     const { type } = req.params;
@@ -875,9 +1077,7 @@ app.post('/api/addons/:type/reorder', (req, res) => {
     if (index === -1) throw new Error('Ese pack no está aplicado al mundo actual.');
 
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= list.length) {
-      return res.json({ ok: true }); // already at the edge, nothing to do
-    }
+    if (targetIndex < 0 || targetIndex >= list.length) return res.json({ ok: true });
     [list[index], list[targetIndex]] = [list[targetIndex], list[index]];
     writeWorldPackList(listFile, list);
     pendingRestart = true;
@@ -885,7 +1085,6 @@ app.post('/api/addons/:type/reorder', (req, res) => {
   });
 });
 
-// Serve a pack's icon (pack_icon.png), falling back to 404 if it doesn't have one.
 app.get('/api/addons/icon', (req, res) => {
   const { type, location, folder } = req.query;
   if (!['resources', 'behavior'].includes(type)) return res.status(400).end();
@@ -976,7 +1175,6 @@ app.post('/api/players/:name/kick', (req, res) => {
   }
 });
 
-// Give operator
 app.post('/api/players/:name/op', (req, res) => {
   try {
     sendConsoleCommand(`op "${req.params.name}"`);
@@ -986,7 +1184,6 @@ app.post('/api/players/:name/op', (req, res) => {
   }
 });
 
-// Remove operator
 app.post('/api/players/:name/deop', (req, res) => {
   try {
     sendConsoleCommand(`deop "${req.params.name}"`);
@@ -996,7 +1193,6 @@ app.post('/api/players/:name/deop', (req, res) => {
   }
 });
 
-// Change gamemode
 app.post('/api/players/:name/gamemode', (req, res) => {
   try {
     const { mode } = req.body || {};

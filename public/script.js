@@ -56,8 +56,7 @@ async function refreshStatus() {
       onlineContainer.innerHTML = '<p class="muted">Nadie está jugando ahora mismo.</p>';
     }
 
-    const lastActivityEl = document.getElementById('lastActivity');
-    lastActivityEl.textContent = data.lastActivity
+    document.getElementById('lastActivity').textContent = data.lastActivity
       ? `Última conexión: ${new Date(data.lastActivity).toLocaleString()}`
       : 'Todavía no hay registros de conexión.';
 
@@ -172,7 +171,6 @@ document.getElementById('formCreateWorld').addEventListener('submit', async (e) 
       body: JSON.stringify(body),
     });
 
-    // Polling cada 2s hasta que el job termine
     let done = false;
     while (!done) {
       await new Promise((r) => setTimeout(r, 2000));
@@ -200,6 +198,93 @@ document.getElementById('formCreateWorld').addEventListener('submit', async (e) 
     submitBtn.disabled = false;
   }
 });
+
+// ---------- Server Update ----------
+
+let autoUpdateCheckInterval = null;
+
+function applyUpdateCheckResult(data) {
+  const banner = document.getElementById('updateBanner');
+  const bannerText = document.getElementById('updateBannerText');
+  const msg = document.getElementById('updateMsg');
+  const btnUpdate = document.getElementById('btnUpdateServer');
+
+  if (data.updateAvailable) {
+    bannerText.innerHTML = `🎉 Nueva actualización detectada: <strong>${data.latest}</strong> (actual: ${data.current || 'desconocida'})`;
+    banner.style.display = 'flex';
+    msg.innerHTML = `Nueva versión disponible: <strong>${data.latest}</strong> (actual: ${data.current || 'desconocida'})`;
+    msg.className = 'msg';
+    btnUpdate.disabled = false;
+    btnUpdate.dataset.downloadUrl = data.downloadUrl;
+  } else {
+    banner.style.display = 'none';
+    msg.textContent = `El servidor está actualizado (versión ${data.current || '?'}).`;
+    msg.className = 'msg success';
+    btnUpdate.disabled = true;
+  }
+}
+
+async function checkForUpdates(force = false) {
+  const msg = document.getElementById('updateMsg');
+  try {
+    const url = force ? 'api/server/update/check?force=1' : 'api/server/update/check';
+    const data = await api(url);
+    applyUpdateCheckResult(data);
+  } catch (e) {
+    if (force) {
+      msg.textContent = e.message;
+      msg.className = 'msg error';
+    }
+  }
+}
+
+async function applyUpdate() {
+  const msg = document.getElementById('updateMsg');
+  const btnUpdate = document.getElementById('btnUpdateServer');
+  const btnBanner = document.getElementById('btnUpdateFromBanner');
+  if (!confirm('Esto detendrá el servidor, hará un backup completo y aplicará la actualización. ¿Continuar?')) return;
+
+  btnUpdate.disabled = true;
+  btnBanner.disabled = true;
+  msg.textContent = 'Iniciando actualización…';
+  msg.className = 'msg';
+
+  try {
+    const { jobId } = await api('api/server/update', { method: 'POST' });
+    let done = false;
+    while (!done) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const job = await api(`api/jobs/${encodeURIComponent(jobId)}`);
+      if (job.status === 'done') {
+        msg.textContent = job.meta?.message || 'Servidor actualizado correctamente.';
+        msg.className = 'msg success';
+        done = true;
+        document.getElementById('updateBanner').style.display = 'none';
+        setTimeout(() => checkForUpdates(true), 3000);
+        refreshStatus();
+        loadBackups();
+      } else if (job.status === 'error') {
+        msg.textContent = `Error: ${job.error}`;
+        msg.className = 'msg error';
+        done = true;
+      } else {
+        const secs = Math.round((Date.now() - job.startedAt) / 1000);
+        msg.textContent = `${job.meta?.message || 'Actualizando…'} (${secs}s)`;
+        msg.className = 'msg';
+      }
+    }
+  } catch (err) {
+    msg.textContent = err.message;
+    msg.className = 'msg error';
+  } finally {
+    btnUpdate.disabled = false;
+    btnBanner.disabled = false;
+  }
+}
+
+document.getElementById('btnCheckUpdates').addEventListener('click', () => checkForUpdates(true));
+document.getElementById('btnUpdateServer').addEventListener('click', applyUpdate);
+document.getElementById('btnUpdateFromBanner').addEventListener('click', applyUpdate);
 
 // ---------- Backups ----------
 
@@ -263,18 +348,21 @@ function renderAddonLists() {
     return filtered
       .map((p) => {
         const versionText = Array.isArray(p.version) ? p.version.join('.') : String(p.version || '?');
+        const brokenTag = p.broken ? '<span class="tag tag-system" title="No se pudo leer el manifest.json">Roto</span>' : '';
+        const scriptTag = p.hasScripts ? '<span class="tag" style="background:rgba(79,140,255,0.15);color:var(--blue);">Scripts</span>' : '';
+        const orderDisabled = !p.uuid || !p.appliedToWorld;
         return `
       <div class="pack-item">
         <img class="pack-icon" src="${iconUrl(p)}" onerror="this.style.visibility='hidden'" alt="" />
         <div class="pack-info">
-          <div>${p.name} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''}</div>
+          <div>${p.name} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''} ${brokenTag} ${scriptTag}</div>
           <div class="meta">v${versionText} · ${p.description || ''}</div>
         </div>
         <div class="pack-actions">
-          <button class="order-btn" data-action="up" data-type="${type}" data-uuid="${p.uuid}" ${!p.appliedToWorld || p.isFirst ? 'disabled' : ''}>▲</button>
-          <button class="order-btn" data-action="down" data-type="${type}" data-uuid="${p.uuid}" ${!p.appliedToWorld || p.isLast ? 'disabled' : ''}>▼</button>
+          <button class="order-btn" data-action="up" data-type="${type}" data-uuid="${p.uuid || ''}" ${orderDisabled || p.isFirst ? 'disabled' : ''}>▲</button>
+          <button class="order-btn" data-action="down" data-type="${type}" data-uuid="${p.uuid || ''}" ${orderDisabled || p.isLast ? 'disabled' : ''}>▼</button>
           <label class="switch" title="Activar/desactivar para el mundo actual">
-            <input type="checkbox" data-toggle="${type}" data-folder="${p.folder}" data-location="${p.location}" ${p.appliedToWorld ? 'checked' : ''} />
+            <input type="checkbox" data-toggle="${type}" data-folder="${p.folder}" data-location="${p.location}" ${p.appliedToWorld ? 'checked' : ''} ${p.broken ? 'disabled' : ''} />
             <span class="slider"></span>
           </label>
           <button class="icon-btn" data-type="${type}" data-folder="${p.folder}" data-location="${p.location}">Eliminar</button>
@@ -313,6 +401,7 @@ function renderAddonLists() {
 
   document.querySelectorAll('.order-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
+      if (!btn.dataset.uuid) return;
       try {
         await api(`api/addons/${btn.dataset.type}/reorder`, {
           method: 'POST',
@@ -352,8 +441,22 @@ document.getElementById('formAddonUpload').addEventListener('submit', async (e) 
   msg.className = 'msg';
   try {
     const result = await api('api/addons/upload', { method: 'POST', body: formData });
-    msg.textContent = `Instalado: ${result.installed.map((p) => p.name).join(', ')}. Reinicia el servidor para aplicar cambios.`;
-    msg.className = 'msg success';
+
+    const parts = [];
+    if (result.installed?.length) {
+      parts.push(`✅ Instalados: ${result.installed.map((p) => p.name).join(', ')}.`);
+    }
+    if (result.skipped?.length) {
+      parts.push(
+        `⚠️ Omitidos: ${result.skipped
+          .map((s) => `${s.dir} (${s.reason})`)
+          .join(' | ')}`
+      );
+    }
+    msg.innerHTML =
+      parts.join('<br/>') + (result.installed?.length ? '<br/>Reinicia el servidor para aplicar cambios.' : '');
+    msg.className = result.skipped?.length ? 'msg error' : 'msg success';
+
     fileInput.value = '';
     loadAddons();
   } catch (err) {
@@ -531,7 +634,6 @@ async function loadPlayers() {
       .join('');
     container.innerHTML = header + rows;
 
-    // Skin click → open modal
     container.querySelectorAll('.player-skin').forEach((img) => {
       img.addEventListener('click', () => {
         const player = players.find((p) => p.name === img.dataset.name);
@@ -539,7 +641,6 @@ async function loadPlayers() {
       });
     });
 
-    // Action buttons
     container.querySelectorAll('button[data-action]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const { action, name } = btn.dataset;
@@ -572,7 +673,6 @@ async function loadPlayers() {
       });
     });
 
-    // Gamemode dropdown
     container.querySelectorAll('.gamemode-select').forEach((sel) => {
       sel.addEventListener('change', async () => {
         const mode = sel.value;
@@ -605,6 +705,11 @@ loadBackups();
 loadAddons();
 refreshConsole();
 loadPlayers();
+
+// Chequeo de actualizaciones: al abrir + cada 30 min
+checkForUpdates(false);
+autoUpdateCheckInterval = setInterval(() => checkForUpdates(false), 30 * 60 * 1000);
+
 setInterval(refreshStatus, 8000);
 setInterval(refreshConsole, 5000);
 setInterval(loadPlayers, 15000);
