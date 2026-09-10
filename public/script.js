@@ -58,6 +58,8 @@ async function refreshStatus() {
     lastActivityEl.textContent = data.lastActivity
       ? `Última conexión: ${new Date(data.lastActivity).toLocaleString()}`
       : 'Todavía no hay registros de conexión.';
+
+    document.getElementById('restartBanner').style.display = data.pendingRestart ? 'flex' : 'none';
   } catch (e) {
     pill.textContent = 'Error';
     pill.className = 'pill pill-unknown';
@@ -85,6 +87,8 @@ document.getElementById('btnStop').addEventListener('click', () => {
     serverAction('stop');
   }
 });
+
+document.getElementById('btnRestartFromBanner').addEventListener('click', () => serverAction('restart'));
 
 document.getElementById('btnDownloadWorld').addEventListener('click', () => {
   window.location.href = '/api/world/download';

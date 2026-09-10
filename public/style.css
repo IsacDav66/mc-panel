@@ -41,6 +41,20 @@ body {
 .pill-stopped { background: rgba(240,87,107,0.15); color: var(--red); }
 .pill-unknown { background: rgba(139,152,172,0.15); color: var(--muted); }
 
+.restart-banner {
+  background: rgba(255,169,77,0.12);
+  border: 1px solid rgba(255,169,77,0.35);
+  color: var(--orange);
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

@@ -36,6 +36,7 @@ fs.mkdirSync(PANEL_DATA_DIR, { recursive: true });
 
 // A simple in-memory lock so two operations don't collide (e.g. two uploads at once)
 let busy = false;
+let pendingRestart = false;
 function withLock(res, fn) {
   if (busy) {
     return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
@@ -417,12 +418,16 @@ app.get('/api/status', (req, res) => {
     levelName: getLevelName(),
     onlinePlayers,
     lastActivity,
+    pendingRestart,
   });
 });
 
 app.post('/api/server/:action', (req, res) => {
   withLock(res, async () => {
     pm2Action(req.params.action);
+    if (req.params.action === 'restart' || req.params.action === 'start') {
+      pendingRestart = false;
+    }
     res.json({ ok: true });
   });
 });
@@ -622,6 +627,7 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
     }
 
     await rmrf(extractTmp);
+    pendingRestart = true;
     res.json({ ok: true, installed });
   });
 });
@@ -650,6 +656,7 @@ app.delete('/api/addons/:type/:folder', (req, res) => {
       writeWorldPackList(listFile, list);
     }
 
+    pendingRestart = true;
     res.json({ ok: true });
   });
 });
@@ -680,6 +687,7 @@ app.post('/api/addons/:type/:folder/toggle', (req, res) => {
       withoutThis.push({ pack_id: manifest.uuid, version: manifest.version });
     }
     writeWorldPackList(listFile, withoutThis);
+    pendingRestart = true;
     res.json({ ok: true });
   });
 });
@@ -703,6 +711,7 @@ app.post('/api/addons/:type/reorder', (req, res) => {
     }
     [list[index], list[targetIndex]] = [list[targetIndex], list[index]];
     writeWorldPackList(listFile, list);
+    pendingRestart = true;
     res.json({ ok: true });
   });
 });
