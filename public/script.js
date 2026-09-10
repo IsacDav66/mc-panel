@@ -1,3 +1,22 @@
+// ============================================================
+//  Helpers defensivos — evitan "Cannot read properties of null"
+// ============================================================
+function $(id) {
+  const el = document.getElementById(id);
+  if (!el) console.warn(`[panel] Elemento #${id} no existe en el DOM.`);
+  return el;
+}
+
+function on(id, event, handler) {
+  const el = document.getElementById(id);
+  if (!el) {
+    console.warn(`[panel] Elemento #${id} no existe en el DOM — listener no añadido.`);
+    return null;
+  }
+  el.addEventListener(event, handler);
+  return el;
+}
+
 async function api(path, options) {
   const res = await fetch(path, options);
   const data = await res.json().catch(() => ({}));
@@ -25,11 +44,23 @@ function formatUptime(ms) {
   return `${h}h ${m}m`;
 }
 
-// ---------- Status ----------
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
+// ============================================================
+//  Status
+// ============================================================
 async function refreshStatus() {
-  const pill = document.getElementById('statusPill');
-  const details = document.getElementById('statusDetails');
+  const pill = $('statusPill');
+  const details = $('statusDetails');
+  if (!pill || !details) return;
+
   try {
     const data = await api('api/status');
     if (!data.found) {
@@ -41,26 +72,33 @@ async function refreshStatus() {
       pill.textContent = online ? 'En línea' : 'Detenido';
       pill.className = `pill ${online ? 'pill-online' : 'pill-stopped'}`;
       details.innerHTML = `
-        Mundo: <strong>${data.levelName}</strong><br/>
+        Mundo: <strong>${escapeHtml(data.levelName)}</strong><br/>
         Uptime: ${formatUptime(data.uptimeMs)} · Reinicios: ${data.restarts} · RAM: ${formatBytes(data.memory)}
       `;
-      document.getElementById('worldName').textContent = data.levelName;
+      const wName = $('worldName');
+      if (wName) wName.textContent = data.levelName;
     }
 
-    const onlineContainer = document.getElementById('onlinePlayersList');
-    if (data.onlinePlayers && data.onlinePlayers.length > 0) {
-      onlineContainer.innerHTML = data.onlinePlayers
-        .map((p) => `<div class="list-item"><div>🟢 ${p.name}</div></div>`)
-        .join('');
-    } else {
-      onlineContainer.innerHTML = '<p class="muted">Nadie está jugando ahora mismo.</p>';
+    const onlineContainer = $('onlinePlayersList');
+    if (onlineContainer) {
+      if (data.onlinePlayers && data.onlinePlayers.length > 0) {
+        onlineContainer.innerHTML = data.onlinePlayers
+          .map((p) => `<div class="list-item"><div>🟢 ${escapeHtml(p.name)}</div></div>`)
+          .join('');
+      } else {
+        onlineContainer.innerHTML = '<p class="muted">Nadie está jugando ahora mismo.</p>';
+      }
     }
 
-    document.getElementById('lastActivity').textContent = data.lastActivity
-      ? `Última conexión: ${new Date(data.lastActivity).toLocaleString()}`
-      : 'Todavía no hay registros de conexión.';
+    const lastActivityEl = $('lastActivity');
+    if (lastActivityEl) {
+      lastActivityEl.textContent = data.lastActivity
+        ? `Última conexión: ${new Date(data.lastActivity).toLocaleString()}`
+        : 'Todavía no hay registros de conexión.';
+    }
 
-    document.getElementById('restartBanner').style.display = data.pendingRestart ? 'flex' : 'none';
+    const restartBanner = $('restartBanner');
+    if (restartBanner) restartBanner.style.display = data.pendingRestart ? 'flex' : 'none';
   } catch (e) {
     pill.textContent = 'Error';
     pill.className = 'pill pill-unknown';
@@ -69,7 +107,7 @@ async function refreshStatus() {
 }
 
 async function serverAction(action) {
-  const buttons = ['btnStart', 'btnRestart', 'btnStop'].map((id) => document.getElementById(id));
+  const buttons = ['btnStart', 'btnRestart', 'btnStop'].map((id) => $(id)).filter(Boolean);
   buttons.forEach((b) => (b.disabled = true));
   try {
     await api(`api/server/${action}`, { method: 'POST' });
@@ -81,88 +119,101 @@ async function serverAction(action) {
   }
 }
 
-document.getElementById('btnStart').addEventListener('click', () => serverAction('start'));
-document.getElementById('btnRestart').addEventListener('click', () => serverAction('restart'));
-document.getElementById('btnStop').addEventListener('click', () => {
+on('btnStart', 'click', () => serverAction('start'));
+on('btnRestart', 'click', () => serverAction('restart'));
+on('btnStop', 'click', () => {
   if (confirm('¿Seguro que quieres detener el servidor? Los jugadores conectados serán desconectados.')) {
     serverAction('stop');
   }
 });
+on('btnRestartFromBanner', 'click', () => serverAction('restart'));
 
-document.getElementById('btnRestartFromBanner').addEventListener('click', () => serverAction('restart'));
-
-// ---------- World download / upload ----------
-
-document.getElementById('btnDownloadWorld').addEventListener('click', () => {
+// ============================================================
+//  World download / upload
+// ============================================================
+on('btnDownloadWorld', 'click', () => {
   window.location.href = 'api/world/download';
 });
 
-document.getElementById('formWorldUpload').addEventListener('submit', async (e) => {
+on('formWorldUpload', 'submit', async (e) => {
   e.preventDefault();
-  const fileInput = document.getElementById('worldFile');
-  const msg = document.getElementById('worldUploadMsg');
-  if (!fileInput.files[0]) return;
+  const fileInput = $('worldFile');
+  const msg = $('worldUploadMsg');
+  if (!fileInput || !fileInput.files[0]) return;
 
   if (!confirm('Esto detendrá el servidor, hará un backup del mundo actual, y lo reemplazará. ¿Continuar?')) return;
 
   const formData = new FormData();
   formData.append('worldfile', fileInput.files[0]);
 
-  msg.textContent = 'Subiendo y reemplazando mundo, esto puede tardar…';
-  msg.className = 'msg';
+  if (msg) {
+    msg.textContent = 'Subiendo y reemplazando mundo, esto puede tardar…';
+    msg.className = 'msg';
+  }
   try {
     await api('api/world/upload', { method: 'POST', body: formData });
-    msg.textContent = '¡Mundo reemplazado con éxito!';
-    msg.className = 'msg success';
+    if (msg) {
+      msg.textContent = '¡Mundo reemplazado con éxito!';
+      msg.className = 'msg success';
+    }
     fileInput.value = '';
     refreshStatus();
     loadBackups();
   } catch (err) {
-    msg.textContent = err.message;
-    msg.className = 'msg error';
+    if (msg) {
+      msg.textContent = err.message;
+      msg.className = 'msg error';
+    }
   }
 });
 
-// ---------- Create world ----------
-
+// ============================================================
+//  Create world
+// ============================================================
 async function loadServerProperties() {
   try {
     const p = await api('api/server/properties');
-    document.getElementById('cwName').placeholder = p.levelName || 'Mi Mundo Nuevo';
-    document.getElementById('cwGamemode').value = p.gamemode || 'survival';
-    document.getElementById('cwDifficulty').value = p.difficulty || 'normal';
-    document.getElementById('cwSeed').value = p.seed || '';
-    document.getElementById('cwCheats').value = p.allowCheats ? 'true' : 'false';
-    document.getElementById('cwPermission').value = p.playerPermission || 'member';
+    const nameEl = $('cwName');
+    if (nameEl) nameEl.placeholder = p.levelName || 'Mi Mundo Nuevo';
+    const gm = $('cwGamemode'); if (gm) gm.value = p.gamemode || 'survival';
+    const diff = $('cwDifficulty'); if (diff) diff.value = p.difficulty || 'normal';
+    const seed = $('cwSeed'); if (seed) seed.value = p.seed || '';
+    const cheats = $('cwCheats'); if (cheats) cheats.value = p.allowCheats ? 'true' : 'false';
+    const perm = $('cwPermission'); if (perm) perm.value = p.playerPermission || 'member';
   } catch (e) {
     /* silencioso */
   }
 }
 
-document.getElementById('formCreateWorld').addEventListener('submit', async (e) => {
+on('formCreateWorld', 'submit', async (e) => {
   e.preventDefault();
-  const msg = document.getElementById('createWorldMsg');
+  const msg = $('createWorldMsg');
   const submitBtn = e.target.querySelector('button[type="submit"]');
-  const name = document.getElementById('cwName').value.trim();
+  const nameEl = $('cwName');
+  const name = nameEl ? nameEl.value.trim() : '';
   if (!name) {
-    msg.textContent = 'Ponle un nombre al mundo.';
-    msg.className = 'msg error';
+    if (msg) {
+      msg.textContent = 'Ponle un nombre al mundo.';
+      msg.className = 'msg error';
+    }
     return;
   }
   if (!confirm(`Se creará un mundo nuevo llamado "${name}" y se reemplazará el actual. ¿Continuar?`)) return;
 
   const body = {
     worldName: name,
-    gamemode: document.getElementById('cwGamemode').value,
-    difficulty: document.getElementById('cwDifficulty').value,
-    seed: document.getElementById('cwSeed').value,
-    allowCheats: document.getElementById('cwCheats').value === 'true',
-    playerPermission: document.getElementById('cwPermission').value,
+    gamemode: $('cwGamemode')?.value || 'survival',
+    difficulty: $('cwDifficulty')?.value || 'normal',
+    seed: $('cwSeed')?.value || '',
+    allowCheats: ($('cwCheats')?.value || 'true') === 'true',
+    playerPermission: $('cwPermission')?.value || 'member',
   };
 
-  submitBtn.disabled = true;
-  msg.textContent = 'Iniciando creación del mundo…';
-  msg.className = 'msg';
+  if (submitBtn) submitBtn.disabled = true;
+  if (msg) {
+    msg.textContent = 'Iniciando creación del mundo…';
+    msg.className = 'msg';
+  }
 
   try {
     const { jobId } = await api('api/world/create', {
@@ -176,62 +227,79 @@ document.getElementById('formCreateWorld').addEventListener('submit', async (e) 
       await new Promise((r) => setTimeout(r, 2000));
       const job = await api(`api/jobs/${encodeURIComponent(jobId)}`);
       if (job.status === 'done') {
-        msg.textContent = '¡Mundo creado! El servidor está regenerando el mundo.';
-        msg.className = 'msg success';
+        if (msg) {
+          msg.textContent = '¡Mundo creado! El servidor está regenerando el mundo.';
+          msg.className = 'msg success';
+        }
         done = true;
         setTimeout(refreshStatus, 2000);
         loadBackups();
       } else if (job.status === 'error') {
-        msg.textContent = `Error: ${job.error}`;
-        msg.className = 'msg error';
+        if (msg) {
+          msg.textContent = `Error: ${job.error}`;
+          msg.className = 'msg error';
+        }
         done = true;
       } else {
         const secs = Math.round((Date.now() - job.startedAt) / 1000);
-        msg.textContent = `Creando mundo… (${secs}s) — no cierres esta pestaña.`;
-        msg.className = 'msg';
+        if (msg) {
+          msg.textContent = `Creando mundo… (${secs}s) — no cierres esta pestaña.`;
+          msg.className = 'msg';
+        }
       }
     }
   } catch (err) {
-    msg.textContent = err.message;
-    msg.className = 'msg error';
+    if (msg) {
+      msg.textContent = err.message;
+      msg.className = 'msg error';
+    }
   } finally {
-    submitBtn.disabled = false;
+    if (submitBtn) submitBtn.disabled = false;
   }
 });
 
-// ---------- Server Update ----------
-
+// ============================================================
+//  Server Update
+// ============================================================
 let autoUpdateCheckInterval = null;
 
 function applyUpdateCheckResult(data) {
-  const banner = document.getElementById('updateBanner');
-  const bannerText = document.getElementById('updateBannerText');
-  const msg = document.getElementById('updateMsg');
-  const btnUpdate = document.getElementById('btnUpdateServer');
+  const banner = $('updateBanner');
+  const bannerText = $('updateBannerText');
+  const msg = $('updateMsg');
+  const btnUpdate = $('btnUpdateServer');
 
   if (data.updateAvailable) {
-    bannerText.innerHTML = `🎉 Nueva actualización detectada: <strong>${data.latest}</strong> (actual: ${data.current || 'desconocida'})`;
-    banner.style.display = 'flex';
-    msg.innerHTML = `Nueva versión disponible: <strong>${data.latest}</strong> (actual: ${data.current || 'desconocida'})`;
-    msg.className = 'msg';
-    btnUpdate.disabled = false;
-    btnUpdate.dataset.downloadUrl = data.downloadUrl;
+    if (bannerText) {
+      bannerText.innerHTML = `🎉 Nueva actualización detectada: <strong>${escapeHtml(data.latest)}</strong> (actual: ${escapeHtml(data.current || 'desconocida')})`;
+    }
+    if (banner) banner.style.display = 'flex';
+    if (msg) {
+      msg.innerHTML = `Nueva versión disponible: <strong>${escapeHtml(data.latest)}</strong> (actual: ${escapeHtml(data.current || 'desconocida')})`;
+      msg.className = 'msg';
+    }
+    if (btnUpdate) {
+      btnUpdate.disabled = false;
+      btnUpdate.dataset.downloadUrl = data.downloadUrl;
+    }
   } else {
-    banner.style.display = 'none';
-    msg.textContent = `El servidor está actualizado (versión ${data.current || '?'}).`;
-    msg.className = 'msg success';
-    btnUpdate.disabled = true;
+    if (banner) banner.style.display = 'none';
+    if (msg) {
+      msg.textContent = `El servidor está actualizado (versión ${data.current || '?'}).`;
+      msg.className = 'msg success';
+    }
+    if (btnUpdate) btnUpdate.disabled = true;
   }
 }
 
 async function checkForUpdates(force = false) {
-  const msg = document.getElementById('updateMsg');
+  const msg = $('updateMsg');
   try {
     const url = force ? 'api/server/update/check?force=1' : 'api/server/update/check';
     const data = await api(url);
     applyUpdateCheckResult(data);
   } catch (e) {
-    if (force) {
+    if (force && msg) {
       msg.textContent = e.message;
       msg.className = 'msg error';
     }
@@ -239,15 +307,17 @@ async function checkForUpdates(force = false) {
 }
 
 async function applyUpdate() {
-  const msg = document.getElementById('updateMsg');
-  const btnUpdate = document.getElementById('btnUpdateServer');
-  const btnBanner = document.getElementById('btnUpdateFromBanner');
+  const msg = $('updateMsg');
+  const btnUpdate = $('btnUpdateServer');
+  const btnBanner = $('btnUpdateFromBanner');
   if (!confirm('Esto detendrá el servidor, hará un backup completo y aplicará la actualización. ¿Continuar?')) return;
 
-  btnUpdate.disabled = true;
-  btnBanner.disabled = true;
-  msg.textContent = 'Iniciando actualización…';
-  msg.className = 'msg';
+  if (btnUpdate) btnUpdate.disabled = true;
+  if (btnBanner) btnBanner.disabled = true;
+  if (msg) {
+    msg.textContent = 'Iniciando actualización…';
+    msg.className = 'msg';
+  }
 
   try {
     const { jobId } = await api('api/server/update', { method: 'POST' });
@@ -256,40 +326,51 @@ async function applyUpdate() {
       await new Promise((r) => setTimeout(r, 2000));
       const job = await api(`api/jobs/${encodeURIComponent(jobId)}`);
       if (job.status === 'done') {
-        msg.textContent = job.meta?.message || 'Servidor actualizado correctamente.';
-        msg.className = 'msg success';
+        if (msg) {
+          msg.textContent = job.meta?.message || 'Servidor actualizado correctamente.';
+          msg.className = 'msg success';
+        }
         done = true;
-        document.getElementById('updateBanner').style.display = 'none';
+        const banner = $('updateBanner');
+        if (banner) banner.style.display = 'none';
         setTimeout(() => checkForUpdates(true), 3000);
         refreshStatus();
         loadBackups();
       } else if (job.status === 'error') {
-        msg.textContent = `Error: ${job.error}`;
-        msg.className = 'msg error';
+        if (msg) {
+          msg.textContent = `Error: ${job.error}`;
+          msg.className = 'msg error';
+        }
         done = true;
       } else {
         const secs = Math.round((Date.now() - job.startedAt) / 1000);
-        msg.textContent = `${job.meta?.message || 'Actualizando…'} (${secs}s)`;
-        msg.className = 'msg';
+        if (msg) {
+          msg.textContent = `${job.meta?.message || 'Actualizando…'} (${secs}s)`;
+          msg.className = 'msg';
+        }
       }
     }
   } catch (err) {
-    msg.textContent = err.message;
-    msg.className = 'msg error';
+    if (msg) {
+      msg.textContent = err.message;
+      msg.className = 'msg error';
+    }
   } finally {
-    btnUpdate.disabled = false;
-    btnBanner.disabled = false;
+    if (btnUpdate) btnUpdate.disabled = false;
+    if (btnBanner) btnBanner.disabled = false;
   }
 }
 
-document.getElementById('btnCheckUpdates').addEventListener('click', () => checkForUpdates(true));
-document.getElementById('btnUpdateServer').addEventListener('click', applyUpdate);
-document.getElementById('btnUpdateFromBanner').addEventListener('click', applyUpdate);
+on('btnCheckUpdates', 'click', () => checkForUpdates(true));
+on('btnUpdateServer', 'click', applyUpdate);
+on('btnUpdateFromBanner', 'click', applyUpdate);
 
-// ---------- Backups ----------
-
+// ============================================================
+//  Backups
+// ============================================================
 async function loadBackups() {
-  const container = document.getElementById('backupsList');
+  const container = $('backupsList');
+  if (!container) return;
   try {
     const backups = await api('api/backups');
     if (backups.length === 0) {
@@ -301,12 +382,12 @@ async function loadBackups() {
         (b) => `
       <div class="list-item">
         <div>
-          ${b.name}
+          ${escapeHtml(b.name)}
           <div class="meta">${formatBytes(b.sizeBytes)} · ${new Date(b.createdAt).toLocaleString()}</div>
         </div>
         <div>
           <a href="api/backups/${encodeURIComponent(b.name)}" class="btn btn-blue" style="padding:6px 10px;font-size:12px;">Descargar</a>
-          <button class="icon-btn" data-file="${b.name}">Eliminar</button>
+          <button class="icon-btn" data-file="${escapeHtml(b.name)}">Eliminar</button>
         </div>
       </div>`
       )
@@ -323,8 +404,9 @@ async function loadBackups() {
   }
 }
 
-// ---------- Addons ----------
-
+// ============================================================
+//  Addons
+// ============================================================
 let lastAddonsData = null;
 
 function iconUrl(p) {
@@ -334,9 +416,10 @@ function iconUrl(p) {
 
 function renderAddonLists() {
   if (!lastAddonsData) return;
-  const showSystem = document.getElementById('showSystemPacks').checked;
-  const resContainer = document.getElementById('resourcePacksList');
-  const behContainer = document.getElementById('behaviorPacksList');
+  const showSystemEl = $('showSystemPacks');
+  const showSystem = showSystemEl ? showSystemEl.checked : false;
+  const resContainer = $('resourcePacksList');
+  const behContainer = $('behaviorPacksList');
 
   const render = (list, type) => {
     const filtered = showSystem ? list : list.filter((p) => !p.builtIn);
@@ -347,38 +430,47 @@ function renderAddonLists() {
     }
     return filtered
       .map((p) => {
-        const versionText = Array.isArray(p.version) ? p.version.join('.') : String(p.version || '?');
-        const brokenTag = p.broken ? '<span class="tag tag-system" title="No se pudo leer el manifest.json">Roto</span>' : '';
-        const scriptTag = p.hasScripts ? '<span class="tag" style="background:rgba(79,140,255,0.15);color:var(--blue);">Scripts</span>' : '';
+        const versionText = Array.isArray(p.version)
+          ? p.version.join('.')
+          : String(p.version || '?');
+        const brokenTag = p.broken
+          ? '<span class="tag tag-system" title="No se pudo leer el manifest.json">Roto</span>'
+          : '';
+        const scriptTag = p.hasScripts
+          ? '<span class="tag" style="background:rgba(79,140,255,0.15);color:var(--blue);">Scripts</span>'
+          : '';
         const orderDisabled = !p.uuid || !p.appliedToWorld;
         return `
       <div class="pack-item">
         <img class="pack-icon" src="${iconUrl(p)}" onerror="this.style.visibility='hidden'" alt="" />
         <div class="pack-info">
-          <div>${p.name} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''} ${brokenTag} ${scriptTag}</div>
-          <div class="meta">v${versionText} · ${p.description || ''}</div>
+          <div>${escapeHtml(p.name)} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''} ${brokenTag} ${scriptTag}</div>
+          <div class="meta">v${escapeHtml(versionText)} · ${escapeHtml(p.description || '')}</div>
         </div>
         <div class="pack-actions">
-          <button class="order-btn" data-action="up" data-type="${type}" data-uuid="${p.uuid || ''}" ${orderDisabled || p.isFirst ? 'disabled' : ''}>▲</button>
-          <button class="order-btn" data-action="down" data-type="${type}" data-uuid="${p.uuid || ''}" ${orderDisabled || p.isLast ? 'disabled' : ''}>▼</button>
+          <button class="order-btn" data-action="up" data-type="${type}" data-uuid="${escapeHtml(p.uuid || '')}" ${orderDisabled || p.isFirst ? 'disabled' : ''}>▲</button>
+          <button class="order-btn" data-action="down" data-type="${type}" data-uuid="${escapeHtml(p.uuid || '')}" ${orderDisabled || p.isLast ? 'disabled' : ''}>▼</button>
           <label class="switch" title="Activar/desactivar para el mundo actual">
-            <input type="checkbox" data-toggle="${type}" data-folder="${p.folder}" data-location="${p.location}" ${p.appliedToWorld ? 'checked' : ''} ${p.broken ? 'disabled' : ''} />
+            <input type="checkbox" data-toggle="${type}" data-folder="${escapeHtml(p.folder)}" data-location="${escapeHtml(p.location)}" ${p.appliedToWorld ? 'checked' : ''} ${p.broken ? 'disabled' : ''} />
             <span class="slider"></span>
           </label>
-          <button class="icon-btn" data-type="${type}" data-folder="${p.folder}" data-location="${p.location}">Eliminar</button>
+          <button class="icon-btn" data-type="${type}" data-folder="${escapeHtml(p.folder)}" data-location="${escapeHtml(p.location)}">Eliminar</button>
         </div>
       </div>`;
       })
       .join('');
   };
 
-  resContainer.innerHTML = render(lastAddonsData.resourcePacks, 'resources');
-  behContainer.innerHTML = render(lastAddonsData.behaviorPacks, 'behavior');
+  if (resContainer) resContainer.innerHTML = render(lastAddonsData.resourcePacks, 'resources');
+  if (behContainer) behContainer.innerHTML = render(lastAddonsData.behaviorPacks, 'behavior');
 
   document.querySelectorAll('.icon-btn[data-folder]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!confirm('¿Eliminar este addon/texture pack?')) return;
-      await api(`api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}?location=${btn.dataset.location}`, { method: 'DELETE' });
+      await api(
+        `api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}?location=${btn.dataset.location}`,
+        { method: 'DELETE' }
+      );
       loadAddons();
     });
   });
@@ -386,11 +478,14 @@ function renderAddonLists() {
   document.querySelectorAll('input[data-toggle]').forEach((input) => {
     input.addEventListener('change', async () => {
       try {
-        await api(`api/addons/${input.dataset.toggle}/${encodeURIComponent(input.dataset.folder)}/toggle`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ location: input.dataset.location, enabled: input.checked }),
-        });
+        await api(
+          `api/addons/${input.dataset.toggle}/${encodeURIComponent(input.dataset.folder)}/toggle`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ location: input.dataset.location, enabled: input.checked }),
+          }
+        );
         loadAddons();
       } catch (e) {
         alert(e.message);
@@ -417,71 +512,85 @@ function renderAddonLists() {
 }
 
 async function loadAddons() {
-  const resContainer = document.getElementById('resourcePacksList');
+  const resContainer = $('resourcePacksList');
   try {
     lastAddonsData = await api('api/addons');
     renderAddonLists();
   } catch (e) {
-    resContainer.textContent = e.message;
+    if (resContainer) resContainer.textContent = e.message;
   }
 }
 
-document.getElementById('showSystemPacks').addEventListener('change', renderAddonLists);
+on('showSystemPacks', 'change', renderAddonLists);
 
-document.getElementById('formAddonUpload').addEventListener('submit', async (e) => {
+on('formAddonUpload', 'submit', async (e) => {
   e.preventDefault();
-  const fileInput = document.getElementById('addonFile');
-  const msg = document.getElementById('addonUploadMsg');
-  if (!fileInput.files[0]) return;
+  const fileInput = $('addonFile');
+  const msg = $('addonUploadMsg');
+  if (!fileInput || !fileInput.files[0]) return;
 
   const formData = new FormData();
   formData.append('addonfile', fileInput.files[0]);
 
-  msg.textContent = 'Instalando addon…';
-  msg.className = 'msg';
+  if (msg) {
+    msg.textContent = 'Instalando addon…';
+    msg.className = 'msg';
+  }
   try {
     const result = await api('api/addons/upload', { method: 'POST', body: formData });
 
     const parts = [];
     if (result.installed?.length) {
-      parts.push(`✅ Instalados: ${result.installed.map((p) => p.name).join(', ')}.`);
+      parts.push(`✅ Instalados: ${result.installed.map((p) => escapeHtml(p.name)).join(', ')}.`);
     }
     if (result.skipped?.length) {
       parts.push(
         `⚠️ Omitidos: ${result.skipped
-          .map((s) => `${s.dir} (${s.reason})`)
+          .map((s) => `${escapeHtml(s.dir)} (${escapeHtml(s.reason)})`)
           .join(' | ')}`
       );
     }
-    msg.innerHTML =
-      parts.join('<br/>') + (result.installed?.length ? '<br/>Reinicia el servidor para aplicar cambios.' : '');
-    msg.className = result.skipped?.length ? 'msg error' : 'msg success';
+    if (parts.length === 0) parts.push('No se instaló ningún pack.');
+
+    if (msg) {
+      msg.innerHTML =
+        parts.join('<br/>') +
+        (result.installed?.length ? '<br/>Reinicia el servidor para aplicar cambios.' : '');
+      msg.className = result.skipped?.length ? 'msg error' : 'msg success';
+    }
 
     fileInput.value = '';
     loadAddons();
   } catch (err) {
-    msg.textContent = err.message;
-    msg.className = 'msg error';
+    if (msg) {
+      msg.textContent = err.message;
+      msg.className = 'msg error';
+    }
   }
 });
 
-// ---------- Console ----------
-
+// ============================================================
+//  Console
+// ============================================================
 async function refreshConsole() {
-  const output = document.getElementById('consoleOutput');
+  const output = $('consoleOutput');
+  if (!output) return;
   try {
     const data = await api('api/console/log?lines=200');
     const wasAtBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 20;
-    output.textContent = data.found ? data.log || '(sin salida todavía)' : 'No se encontró el proceso del servidor.';
+    output.textContent = data.found
+      ? data.log || '(sin salida todavía)'
+      : 'No se encontró el proceso del servidor.';
     if (wasAtBottom) output.scrollTop = output.scrollHeight;
   } catch (e) {
     output.textContent = e.message;
   }
 }
 
-document.getElementById('formConsoleSend').addEventListener('submit', async (e) => {
+on('formConsoleSend', 'submit', async (e) => {
   e.preventDefault();
-  const input = document.getElementById('consoleInput');
+  const input = $('consoleInput');
+  if (!input) return;
   const command = input.value.trim();
   if (!command) return;
   input.value = '';
@@ -497,8 +606,9 @@ document.getElementById('formConsoleSend').addEventListener('submit', async (e) 
   }
 });
 
-// ---------- Skin 3D viewer ----------
-
+// ============================================================
+//  Skin 3D viewer
+// ============================================================
 let currentSkinViewer = null;
 
 function skinAvatarUrl(player, size = 40) {
@@ -512,7 +622,8 @@ function skinTextureUrl(player) {
 }
 
 function closeSkinModal() {
-  document.getElementById('skinModal').style.display = 'none';
+  const modal = $('skinModal');
+  if (modal) modal.style.display = 'none';
   if (currentSkinViewer) {
     try {
       currentSkinViewer.dispose();
@@ -522,11 +633,14 @@ function closeSkinModal() {
 }
 
 async function openSkinModal(player) {
-  const modal = document.getElementById('skinModal');
-  document.getElementById('skinModalName').textContent = player.name;
+  const modal = $('skinModal');
+  const nameEl = $('skinModalName');
+  if (!modal) return;
+  if (nameEl) nameEl.textContent = player.name;
   modal.style.display = 'flex';
 
-  const canvas = document.getElementById('skinCanvas');
+  const canvas = $('skinCanvas');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -538,7 +652,8 @@ async function openSkinModal(player) {
   }
 
   if (typeof skinview3d === 'undefined') {
-    document.getElementById('skinModalHint').textContent = 'No se pudo cargar el visor 3D (CDN no disponible).';
+    const hint = $('skinModalHint');
+    if (hint) hint.textContent = 'No se pudo cargar el visor 3D (CDN no disponible).';
     return;
   }
 
@@ -554,25 +669,29 @@ async function openSkinModal(player) {
     currentSkinViewer.autoRotateSpeed = 0.6;
     currentSkinViewer.animation = new skinview3d.WalkingAnimation();
     currentSkinViewer.animation.speed = 1;
-    document.getElementById('skinModalHint').textContent = 'Arrastra para rotar · rueda para zoom';
+    const hint = $('skinModalHint');
+    if (hint) hint.textContent = 'Arrastra para rotar · rueda para zoom';
   } catch (e) {
     console.error(e);
-    document.getElementById('skinModalHint').textContent = 'No se pudo cargar la skin 3D.';
+    const hint = $('skinModalHint');
+    if (hint) hint.textContent = 'No se pudo cargar la skin 3D.';
   }
 }
 
-document.getElementById('skinModalClose').addEventListener('click', closeSkinModal);
-document.getElementById('skinModal').addEventListener('click', (e) => {
+on('skinModalClose', 'click', closeSkinModal);
+on('skinModal', 'click', (e) => {
   if (e.target.id === 'skinModal') closeSkinModal();
 });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeSkinModal();
 });
 
-// ---------- Players ----------
-
+// ============================================================
+//  Players
+// ============================================================
 async function loadPlayers() {
-  const container = document.getElementById('playersTable');
+  const container = $('playersTable');
+  if (!container) return;
   try {
     const players = await api('api/players');
     if (players.length === 0) {
@@ -586,14 +705,20 @@ async function loadPlayers() {
     const rows = players
       .map((p) => {
         const statusBadges = [
-          p.online ? '<span class="tag" style="background:rgba(62,207,142,0.15);color:var(--green);">En línea</span>' : '',
-          p.banned ? '<span class="tag" style="background:rgba(240,87,107,0.15);color:var(--red);">Baneado</span>' : '',
-          p.isOp ? '<span class="tag" style="background:rgba(255,169,77,0.15);color:var(--orange);">Admin</span>' : '',
+          p.online
+            ? '<span class="tag" style="background:rgba(62,207,142,0.15);color:var(--green);">En línea</span>'
+            : '',
+          p.banned
+            ? '<span class="tag" style="background:rgba(240,87,107,0.15);color:var(--red);">Baneado</span>'
+            : '',
+          p.isOp
+            ? '<span class="tag" style="background:rgba(255,169,77,0.15);color:var(--orange);">Admin</span>'
+            : '',
           p.allowlisted ? '<span class="tag">Allowlist</span>' : '',
         ]
           .filter(Boolean)
           .join(' ');
-        const safeName = p.name.replace(/"/g, '&quot;');
+        const safeName = escapeHtml(p.name);
         const skinUrl = skinAvatarUrl(p);
         const fallback = `https://mc-heads.net/avatar/MHF_Steve/40`;
         return `
@@ -602,7 +727,7 @@ async function loadPlayers() {
             <img class="player-skin" src="${skinUrl}"
                  onerror="this.onerror=null;this.src='${fallback}'"
                  data-name="${safeName}" title="Ver skin 3D" />
-            <span>${p.name}</span>
+            <span>${safeName}</span>
           </div>
           <div class="meta">${p.firstSeen ? new Date(p.firstSeen).toLocaleDateString() : '—'}</div>
           <div class="meta">${p.lastSeen ? new Date(p.lastSeen).toLocaleString() : '—'}</div>
@@ -697,8 +822,9 @@ async function loadPlayers() {
   }
 }
 
-// ---------- Boot ----------
-
+// ============================================================
+//  Boot
+// ============================================================
 refreshStatus();
 loadServerProperties();
 loadBackups();
