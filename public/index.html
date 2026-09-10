@@ -38,21 +38,80 @@
         <p class="muted" id="lastActivity" style="margin-top:10px;">—</p>
       </section>
 
-      <section class="card">
+      <section class="card card-wide">
         <h2>Mundo actual</h2>
         <p class="muted" id="worldName">—</p>
-        <div class="button-row">
-          <button id="btnDownloadWorld" class="btn btn-blue">Descargar copia (.mcworld)</button>
+
+        <div class="two-col">
+          <div>
+            <h3>Descargar copia</h3>
+            <button id="btnDownloadWorld" class="btn btn-blue">Descargar .mcworld</button>
+          </div>
+          <div>
+            <h3>Subir mundo existente</h3>
+            <p class="muted">Detiene el servidor, hace backup del mundo actual y lo reemplaza por el archivo subido
+              (.mcworld o .zip).</p>
+            <form id="formWorldUpload" class="upload-form">
+              <input type="file" id="worldFile" accept=".mcworld,.zip" required />
+              <button type="submit" class="btn btn-orange">Reemplazar</button>
+            </form>
+            <div id="worldUploadMsg" class="msg"></div>
+          </div>
         </div>
+
         <hr />
-        <h3>Reemplazar mundo</h3>
-        <p class="muted">Esto detiene el servidor, hace un backup automático del mundo actual, y lo reemplaza por el
-          archivo que subas (.mcworld o .zip).</p>
-        <form id="formWorldUpload" class="upload-form">
-          <input type="file" id="worldFile" accept=".mcworld,.zip" required />
-          <button type="submit" class="btn btn-orange">Reemplazar mundo</button>
+
+        <h3>Crear mundo nuevo desde cero</h3>
+        <p class="muted">
+          Genera un mundo nuevo en blanco con los ajustes que elijas. El mundo actual se respalda
+          automáticamente antes de reemplazarlo.
+        </p>
+        <form id="formCreateWorld" class="create-world-form">
+          <div>
+            <label for="cwName">Nombre del mundo</label>
+            <input type="text" id="cwName" placeholder="Mi Mundo Nuevo" required maxlength="80" />
+          </div>
+          <div>
+            <label for="cwSeed">Semilla (opcional)</label>
+            <input type="text" id="cwSeed" placeholder="Vacío = aleatoria" />
+          </div>
+          <div>
+            <label for="cwGamemode">Modo de juego</label>
+            <select id="cwGamemode">
+              <option value="survival">Survival</option>
+              <option value="creative">Creative</option>
+              <option value="adventure">Adventure</option>
+            </select>
+          </div>
+          <div>
+            <label for="cwDifficulty">Dificultad</label>
+            <select id="cwDifficulty">
+              <option value="peaceful">Peaceful</option>
+              <option value="easy">Easy</option>
+              <option value="normal">Normal</option>
+              <option value="hard">Hard</option>
+            </select>
+          </div>
+          <div>
+            <label for="cwPermission">Permiso por defecto</label>
+            <select id="cwPermission">
+              <option value="visitor">Visitor</option>
+              <option value="member">Member</option>
+              <option value="operator">Operator</option>
+            </select>
+          </div>
+          <div>
+            <label for="cwCheats">Cheats</label>
+            <select id="cwCheats">
+              <option value="true">Activados</option>
+              <option value="false">Desactivados</option>
+            </select>
+          </div>
+          <div class="form-full">
+            <button type="submit" class="btn btn-green">Crear y reemplazar mundo</button>
+            <div id="createWorldMsg" class="msg"></div>
+          </div>
         </form>
-        <div id="worldUploadMsg" class="msg"></div>
       </section>
 
       <section class="card">
@@ -87,7 +146,8 @@
       <section class="card card-wide">
         <h2>Consola de administrador</h2>
         <p class="muted">Envía comandos directamente al servidor (ej: <code>list</code>, <code>say hola</code>,
-          <code>gamerule keepInventory true</code>).</p>
+          <code>gamerule keepInventory true</code>).
+        </p>
         <pre id="consoleOutput" class="console-output">Cargando…</pre>
         <form id="formConsoleSend" class="upload-form">
           <input type="text" id="consoleInput" placeholder="Escribe un comando…" autocomplete="off"
@@ -98,13 +158,28 @@
 
       <section class="card card-wide">
         <h2>Usuarios</h2>
-        <p class="muted">Jugadores que se han conectado alguna vez a este servidor.</p>
+        <p class="muted">Jugadores que se han conectado alguna vez. Haz clic en la skin para ver el modelo 3D.</p>
         <div id="playersTable" class="list">Cargando…</div>
       </section>
 
     </main>
   </div>
 
+  <!-- Modal visor 3D de skin -->
+  <div id="skinModal" class="modal-overlay" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="skinModalName">Jugador</h3>
+        <button id="skinModalClose" class="modal-close" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <canvas id="skinCanvas" width="200" height="320"></canvas>
+      </div>
+      <div class="modal-footer muted" id="skinModalHint">Arrastra para rotar · rueda para zoom</div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/skinview3d@3/bundles/skinview3d.bundle.js"></script>
   <script src="script.js"></script>
 </body>
 

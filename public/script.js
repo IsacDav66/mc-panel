@@ -10,10 +10,7 @@ function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB'];
   let i = 0;
   let n = bytes;
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i++;
-  }
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(1)} ${units[i]}`;
 }
 
@@ -24,6 +21,8 @@ function formatUptime(ms) {
   const m = Math.floor((s % 3600) / 60);
   return `${h}h ${m}m`;
 }
+
+// ---------- Status ----------
 
 async function refreshStatus() {
   const pill = document.getElementById('statusPill');
@@ -54,8 +53,7 @@ async function refreshStatus() {
       onlineContainer.innerHTML = '<p class="muted">Nadie está jugando ahora mismo.</p>';
     }
 
-    const lastActivityEl = document.getElementById('lastActivity');
-    lastActivityEl.textContent = data.lastActivity
+    document.getElementById('lastActivity').textContent = data.lastActivity
       ? `Última conexión: ${new Date(data.lastActivity).toLocaleString()}`
       : 'Todavía no hay registros de conexión.';
 
@@ -87,8 +85,9 @@ document.getElementById('btnStop').addEventListener('click', () => {
     serverAction('stop');
   }
 });
-
 document.getElementById('btnRestartFromBanner').addEventListener('click', () => serverAction('restart'));
+
+// ---------- World download / upload ----------
 
 document.getElementById('btnDownloadWorld').addEventListener('click', () => {
   window.location.href = 'api/world/download';
@@ -119,6 +118,60 @@ document.getElementById('formWorldUpload').addEventListener('submit', async (e) 
     msg.className = 'msg error';
   }
 });
+
+// ---------- Create world ----------
+
+async function loadServerProperties() {
+  try {
+    const p = await api('api/server/properties');
+    document.getElementById('cwName').placeholder = p.levelName || 'Mi Mundo Nuevo';
+    document.getElementById('cwGamemode').value = p.gamemode || 'survival';
+    document.getElementById('cwDifficulty').value = p.difficulty || 'normal';
+    document.getElementById('cwSeed').value = p.seed || '';
+    document.getElementById('cwCheats').value = p.allowCheats ? 'true' : 'false';
+    document.getElementById('cwPermission').value = p.playerPermission || 'member';
+  } catch (e) { /* silencioso */ }
+}
+
+document.getElementById('formCreateWorld').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('createWorldMsg');
+  const name = document.getElementById('cwName').value.trim();
+  if (!name) {
+    msg.textContent = 'Ponle un nombre al mundo.';
+    msg.className = 'msg error';
+    return;
+  }
+  if (!confirm(`Se creará un mundo nuevo llamado "${name}" y se reemplazará el actual. ¿Continuar?`)) return;
+
+  const body = {
+    worldName: name,
+    gamemode: document.getElementById('cwGamemode').value,
+    difficulty: document.getElementById('cwDifficulty').value,
+    seed: document.getElementById('cwSeed').value,
+    allowCheats: document.getElementById('cwCheats').value === 'true',
+    playerPermission: document.getElementById('cwPermission').value,
+  };
+
+  msg.textContent = 'Creando mundo nuevo… (puede tardar unos segundos)';
+  msg.className = 'msg';
+  try {
+    await api('api/world/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    msg.textContent = '¡Mundo creado! El servidor está regenerando el mundo.';
+    msg.className = 'msg success';
+    setTimeout(refreshStatus, 2000);
+    loadBackups();
+  } catch (err) {
+    msg.textContent = err.message;
+    msg.className = 'msg error';
+  }
+});
+
+// ---------- Backups ----------
 
 async function loadBackups() {
   const container = document.getElementById('backupsList');
@@ -154,6 +207,8 @@ async function loadBackups() {
     container.textContent = e.message;
   }
 }
+
+// ---------- Addons ----------
 
 let lastAddonsData = null;
 
@@ -243,16 +298,38 @@ function renderAddonLists() {
 }
 
 async function loadAddons() {
-  const resContainer = document.getElementById('resourcePacksList');
   try {
     lastAddonsData = await api('api/addons');
     renderAddonLists();
   } catch (e) {
-    resContainer.textContent = e.message;
+    document.getElementById('resourcePacksList').textContent = e.message;
   }
 }
 
 document.getElementById('showSystemPacks').addEventListener('change', renderAddonLists);
+
+document.getElementById('formAddonUpload').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('addonFile');
+  const msg = document.getElementById('addonUploadMsg');
+  if (!fileInput.files[0]) return;
+
+  const formData = new FormData();
+  formData.append('addonfile', fileInput.files[0]);
+
+  msg.textContent = 'Instalando addon…';
+  msg.className = 'msg';
+  try {
+    const result = await api('api/addons/upload', { method: 'POST', body: formData });
+    msg.textContent = `Instalado: ${result.installed.map((p) => p.name).join(', ')}. Reinicia el servidor para aplicar cambios.`;
+    msg.className = 'msg success';
+    fileInput.value = '';
+    loadAddons();
+  } catch (err) {
+    msg.textContent = err.message;
+    msg.className = 'msg error';
+  }
+});
 
 // ---------- Console ----------
 
@@ -286,6 +363,74 @@ document.getElementById('formConsoleSend').addEventListener('submit', async (e) 
   }
 });
 
+// ---------- Skin 3D viewer ----------
+
+let currentSkinViewer = null;
+
+function skinAvatarUrl(player, size = 40) {
+  if (player.xuid) return `https://mc-heads.net/avatar/xuid_${player.xuid}/${size}`;
+  return `https://mc-heads.net/avatar/${encodeURIComponent(player.name)}/${size}`;
+}
+
+function skinTextureUrl(player) {
+  if (player.xuid) return `https://mc-heads.net/skin/xuid_${player.xuid}`;
+  return `https://mc-heads.net/skin/${encodeURIComponent(player.name)}`;
+}
+
+function closeSkinModal() {
+  document.getElementById('skinModal').style.display = 'none';
+  if (currentSkinViewer) {
+    try { currentSkinViewer.dispose(); } catch (e) {}
+    currentSkinViewer = null;
+  }
+}
+
+async function openSkinModal(player) {
+  const modal = document.getElementById('skinModal');
+  document.getElementById('skinModalName').textContent = player.name;
+  modal.style.display = 'flex';
+
+  const canvas = document.getElementById('skinCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (currentSkinViewer) {
+    try { currentSkinViewer.dispose(); } catch (e) {}
+    currentSkinViewer = null;
+  }
+
+  if (typeof skinview3d === 'undefined') {
+    document.getElementById('skinModalHint').textContent = 'No se pudo cargar el visor 3D (CDN no disponible).';
+    return;
+  }
+
+  try {
+    currentSkinViewer = new skinview3d.SkinViewer({
+      canvas,
+      width: 200,
+      height: 320,
+      skin: skinTextureUrl(player),
+      preserveDrawingBuffer: true,
+    });
+    currentSkinViewer.autoRotate = true;
+    currentSkinViewer.autoRotateSpeed = 0.6;
+    currentSkinViewer.animation = new skinview3d.WalkingAnimation();
+    currentSkinViewer.animation.speed = 1;
+    document.getElementById('skinModalHint').textContent = 'Arrastra para rotar · rueda para zoom';
+  } catch (e) {
+    console.error(e);
+    document.getElementById('skinModalHint').textContent = 'No se pudo cargar la skin 3D.';
+  }
+}
+
+document.getElementById('skinModalClose').addEventListener('click', closeSkinModal);
+document.getElementById('skinModal').addEventListener('click', (e) => {
+  if (e.target.id === 'skinModal') closeSkinModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSkinModal();
+});
+
 // ---------- Players ----------
 
 async function loadPlayers() {
@@ -298,55 +443,112 @@ async function loadPlayers() {
     }
     const header = `
       <div class="players-table-header">
-        <div>Jugador</div><div>Primera vez</div><div>Última vez</div><div>Estado</div><div>Acciones</div>
+        <div>Jugador</div><div>Primera vez</div><div>Última vez</div><div>Estado</div><div>Modo</div><div>Acciones</div>
       </div>`;
     const rows = players
       .map((p) => {
         const statusBadges = [
           p.online ? '<span class="tag" style="background:rgba(62,207,142,0.15);color:var(--green);">En línea</span>' : '',
           p.banned ? '<span class="tag" style="background:rgba(240,87,107,0.15);color:var(--red);">Baneado</span>' : '',
+          p.isOp ? '<span class="tag" style="background:rgba(255,169,77,0.15);color:var(--orange);">Admin</span>' : '',
           p.allowlisted ? '<span class="tag">Allowlist</span>' : '',
-        ]
-          .filter(Boolean)
-          .join(' ');
+        ].filter(Boolean).join(' ');
+        const safeName = p.name.replace(/"/g, '&quot;');
+        const skinUrl = skinAvatarUrl(p);
+        const fallback = `https://mc-heads.net/avatar/MHF_Steve/40`;
         return `
         <div class="player-row">
-          <div>${p.name}</div>
+          <div class="player-cell-name">
+            <img class="player-skin" src="${skinUrl}"
+                 onerror="this.onerror=null;this.src='${fallback}'"
+                 data-name="${safeName}" title="Ver skin 3D" />
+            <span>${p.name}</span>
+          </div>
           <div class="meta">${p.firstSeen ? new Date(p.firstSeen).toLocaleDateString() : '—'}</div>
           <div class="meta">${p.lastSeen ? new Date(p.lastSeen).toLocaleString() : '—'}</div>
           <div>${statusBadges || '—'}</div>
+          <div>
+            <select class="gamemode-select" data-name="${safeName}">
+              <option value="">Modo…</option>
+              <option value="survival">Survival</option>
+              <option value="creative">Creative</option>
+              <option value="adventure">Adventure</option>
+              <option value="spectator">Spectator</option>
+            </select>
+          </div>
           <div class="player-actions">
-            ${p.online ? `<button class="btn-mini-kick" data-action="kick" data-name="${p.name}">Expulsar</button>` : ''}
-            ${
-              p.banned
-                ? `<button class="btn-mini-unban" data-action="unban" data-name="${p.name}">Desbanear</button>`
-                : `<button class="btn-mini-ban" data-action="ban" data-name="${p.name}">Banear</button>`
-            }
+            ${p.online ? `<button class="btn-mini-kick" data-action="kick" data-name="${safeName}">Expulsar</button>` : ''}
+            ${p.isOp
+              ? `<button class="btn-mini-unban" data-action="deop" data-name="${safeName}">Quitar admin</button>`
+              : `<button class="btn-mini-kick" data-action="op" data-name="${safeName}">Dar admin</button>`}
+            ${p.banned
+              ? `<button class="btn-mini-unban" data-action="unban" data-name="${safeName}">Desbanear</button>`
+              : `<button class="btn-mini-ban" data-action="ban" data-name="${safeName}">Banear</button>`}
           </div>
         </div>`;
       })
       .join('');
     container.innerHTML = header + rows;
 
+    // Skin click → open modal
+    container.querySelectorAll('.player-skin').forEach((img) => {
+      img.addEventListener('click', () => {
+        const player = players.find((p) => p.name === img.dataset.name);
+        if (player) openSkinModal(player);
+      });
+    });
+
+    // Action buttons
     container.querySelectorAll('button[data-action]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const { action, name } = btn.dataset;
-        if (action === 'ban') {
-          const reason = prompt(`Razón del ban para ${name} (opcional):`, '') || '';
-          if (!confirm(`¿Banear a ${name}?`)) return;
-          await api(`api/players/${encodeURIComponent(name)}/ban`, {
+        try {
+          if (action === 'ban') {
+            const reason = prompt(`Razón del ban para ${name} (opcional):`, '') || '';
+            if (!confirm(`¿Banear a ${name}?`)) return;
+            await api(`api/players/${encodeURIComponent(name)}/ban`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason }),
+            });
+          } else if (action === 'unban') {
+            if (!confirm(`¿Desbanear a ${name}?`)) return;
+            await api(`api/players/${encodeURIComponent(name)}/unban`, { method: 'POST' });
+          } else if (action === 'kick') {
+            if (!confirm(`¿Expulsar a ${name}?`)) return;
+            await api(`api/players/${encodeURIComponent(name)}/kick`, { method: 'POST' });
+          } else if (action === 'op') {
+            if (!confirm(`¿Dar admin (op) a ${name}?`)) return;
+            await api(`api/players/${encodeURIComponent(name)}/op`, { method: 'POST' });
+          } else if (action === 'deop') {
+            if (!confirm(`¿Quitar admin a ${name}?`)) return;
+            await api(`api/players/${encodeURIComponent(name)}/deop`, { method: 'POST' });
+          }
+          setTimeout(loadPlayers, 1200);
+        } catch (e) {
+          alert(e.message);
+        }
+      });
+    });
+
+    // Gamemode dropdown
+    container.querySelectorAll('.gamemode-select').forEach((sel) => {
+      sel.addEventListener('change', async () => {
+        const mode = sel.value;
+        const name = sel.dataset.name;
+        if (!mode) return;
+        try {
+          await api(`api/players/${encodeURIComponent(name)}/gamemode`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason }),
+            body: JSON.stringify({ mode }),
           });
-        } else if (action === 'unban') {
-          if (!confirm(`¿Desbanear a ${name}?`)) return;
-          await api(`api/players/${encodeURIComponent(name)}/unban`, { method: 'POST' });
-        } else if (action === 'kick') {
-          if (!confirm(`¿Expulsar a ${name}?`)) return;
-          await api(`api/players/${encodeURIComponent(name)}/kick`, { method: 'POST' });
+          sel.value = '';
+          setTimeout(loadPlayers, 1200);
+        } catch (e) {
+          alert(e.message);
+          sel.value = '';
         }
-        setTimeout(loadPlayers, 500);
       });
     });
   } catch (e) {
@@ -354,30 +556,10 @@ async function loadPlayers() {
   }
 }
 
-document.getElementById('formAddonUpload').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const fileInput = document.getElementById('addonFile');
-  const msg = document.getElementById('addonUploadMsg');
-  if (!fileInput.files[0]) return;
-
-  const formData = new FormData();
-  formData.append('addonfile', fileInput.files[0]);
-
-  msg.textContent = 'Instalando addon…';
-  msg.className = 'msg';
-  try {
-    const result = await api('api/addons/upload', { method: 'POST', body: formData });
-    msg.textContent = `Instalado: ${result.installed.map((p) => p.name).join(', ')}. Reinicia el servidor para aplicar cambios.`;
-    msg.className = 'msg success';
-    fileInput.value = '';
-    loadAddons();
-  } catch (err) {
-    msg.textContent = err.message;
-    msg.className = 'msg error';
-  }
-});
+// ---------- Boot ----------
 
 refreshStatus();
+loadServerProperties();
 loadBackups();
 loadAddons();
 refreshConsole();
