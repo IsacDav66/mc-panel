@@ -507,19 +507,37 @@ async function getLatestBedrockDownload() {
 }
 
 function getCurrentBedrockVersion() {
+  // 1. Intentar leer version.json (formato oficial del BDS)
   const versionFile = path.join(BEDROCK_DIR, 'version.json');
   if (fs.existsSync(versionFile)) {
     try {
       const data = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+      // El archivo puede tener la clave "version" o "serverVersion"
       return data.version || data.serverVersion || null;
-    } catch (e) {}
+    } catch (e) {
+      // Si falla el parseo, continuamos con el siguiente método
+    }
   }
+
+  // 2. Fallback: extraer la versión del nombre del archivo bedrock_server
+  //    Normalmente el binario se llama "bedrock_server" y la versión está en el log o en el nombre del zip original.
+  //    Una forma fiable es buscar en la carpeta un archivo como "bedrock-server-1.26.45.1.zip" o similar.
+  try {
+    const files = fs.readdirSync(BEDROCK_DIR);
+    const versionedFile = files.find(f => f.startsWith('bedrock-server-') && f.endsWith('.zip'));
+    if (versionedFile) {
+      const match = versionedFile.match(/bedrock-server-([\d.]+)\.zip/);
+      if (match) return match[1];
+    }
+  } catch (e) {}
+
+  // 3. Último recurso: intentar obtenerla del ejecutable (puede no funcionar en todos los casos)
   try {
     const out = execSync(`strings "${path.join(BEDROCK_DIR, 'bedrock_server')}" | grep -m1 "v[0-9]"`, { encoding: 'utf8' });
     const match = out.match(/v([\d.]+)/);
     return match ? match[1] : null;
   } catch (e) {
-    return null;
+    return null; // No se pudo determinar la versión
   }
 }
 
