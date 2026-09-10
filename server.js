@@ -192,11 +192,39 @@ function normalizeVersion(v) {
   return [1, 0, 0];
 }
 
-const BUILTIN_FOLDER_PATTERN = /^(vanilla|chemistry|editor|experimental_|server_editor_library|server_ui_library|image_experiment|physics)/i;
+// Los packs del BDS vienen en minúsculas exactas. Cualquier carpeta con
+// mayúsculas es de un usuario y nunca debe considerarse built-in.
+const BUILTIN_EXACT = new Set([
+  'vanilla',
+  'chemistry',
+  'editor',
+  'server_editor_library',
+  'server_library',
+  'server_ui_library',
+  'image_experiment',
+  'physics',
+]);
+
+const BUILTIN_PREFIXES = [
+  'vanilla_',
+  'chemistry_',
+  'physics_',
+  'experimental_',
+  'image_experiment_',
+];
+
+function isBuiltInFolder(folderName) {
+  // BDS usa siempre minúsculas para sus carpetas internas.
+  if (folderName !== folderName.toLowerCase()) return false;
+  if (BUILTIN_EXACT.has(folderName)) return true;
+  return BUILTIN_PREFIXES.some((p) => folderName.startsWith(p));
+}
+
+// Algunos manifiestos internos usan este name para marcarse como sistema.
 const BUILTIN_NAME_PATTERN = /^(resourcePack|behaviorPack)\./i;
 
 function isBuiltInPack(folderName, builtInByName) {
-  return BUILTIN_FOLDER_PATTERN.test(folderName) || builtInByName;
+  return isBuiltInFolder(folderName) || builtInByName;
 }
 
 function loadLangMap(dir) {
