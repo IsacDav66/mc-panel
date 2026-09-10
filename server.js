@@ -35,8 +35,10 @@ fs.mkdirSync(RESOURCE_PACKS_DIR, { recursive: true });
 fs.mkdirSync(BEHAVIOR_PACKS_DIR, { recursive: true });
 fs.mkdirSync(PANEL_DATA_DIR, { recursive: true });
 
+// A simple in-memory lock so two operations don't collide (e.g. two uploads at once)
 let busy = false;
 let pendingRestart = false;
+
 function withLock(res, fn) {
   if (busy) {
     return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
@@ -53,9 +55,27 @@ function withLock(res, fn) {
     });
 }
 
+// ---------- async job tracker (para operaciones largas que causarían 504) ----------
+const jobs = new Map();
+const JOB_TTL_MS = 10 * 60 * 1000; // limpiar jobs viejos tras 10 min
+
+function createJob() {
+  const id = crypto.randomUUID();
+  jobs.set(id, {
+    id,
+    status: 'running',
+    startedAt: Date.now(),
+    finishedAt: null,
+    error: null,
+    meta: {},
+  });
+  setTimeout(() => jobs.delete(id), JOB_TTL_MS);
+  return id;
+}
+
 const upload = multer({
   dest: UPLOAD_TMP,
-  limits: { fileSize: 500 * 1024 * 1024 },
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
 });
 
 const app = express();
@@ -97,7 +117,7 @@ function updateProperties(updates) {
     const idx = trimmed.indexOf('=');
     if (idx === -1) return line;
     const key = trimmed.slice(0, idx);
-    if (key in updates) {
+    if (Object.prototype.hasOwnProperty.call(updates, key)) {
       seen.add(key);
       return `${key}=${updates[key]}`;
     }
@@ -174,6 +194,9 @@ function normalizeVersion(v) {
   return [1, 0, 0];
 }
 
+// Packs shipped by default inside the official Bedrock Dedicated Server download
+// (vanilla assets, level editor, chemistry, experimental features, etc).
+// We hide these by default since the user only cares about packs they installed themselves.
 const BUILTIN_FOLDER_PATTERN = /^(vanilla|chemistry|editor|experimental_|server_editor_library|server_ui_library|image_experiment|physics)/i;
 const BUILTIN_NAME_PATTERN = /^(resourcePack|behaviorPack)\./i;
 
@@ -201,7 +224,9 @@ function loadLangMap(dir) {
       if (idx === -1) return;
       map[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
     });
-  } catch (e) {}
+  } catch (e) {
+    // ignore malformed lang files
+  }
   return map;
 }
 
@@ -269,6 +294,8 @@ function writeWorldPackList(fileName, list) {
   fs.writeFileSync(filePath, JSON.stringify(list, null, 2));
 }
 
+// ---------- helpers: generic JSON read/write ----------
+
 function readJson(filePath, defaultValue) {
   if (!fs.existsSync(filePath)) return defaultValue;
   try {
@@ -282,7 +309,7 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 }
 
-// ---------- console / FIFO ----------
+// ---------- helpers: console / FIFO ----------
 
 function getPm2LogPaths() {
   const proc = findPm2Process();
@@ -305,16 +332,17 @@ function tailFile(filePath, lines) {
 function sendConsoleCommand(command) {
   if (!fs.existsSync(CONSOLE_FIFO)) {
     throw new Error(
-      'No se encontró el FIFO de consola (console.fifo). El servidor debe arrancar con el script start.sh para poder recibir comandos.'
+      'No se encontró el FIFO de consola (console.fifo). El servidor debe arrancar con el script start.sh para poder recibir comandos — revisa la guía de instalación de la consola.'
     );
   }
+  // Writing to a FIFO that already has a reader open (see start.sh) is non-blocking.
   fs.appendFileSync(CONSOLE_FIFO, command.trim() + '\n');
 }
 
-// ---------- player tracking ----------
+// ---------- helpers: player tracking ----------
 
 let onlineSet = new Set();
-let logReadOffset = null;
+let logReadOffset = null; // set on first poll to current EOF, so we don't replay old history
 
 function loadPlayers() {
   return readJson(PLAYERS_FILE, {});
@@ -336,7 +364,7 @@ function touchPlayer(name, xuid, isOnline) {
   const key = xuid || name;
   const now = new Date().toISOString();
   const existing = players[key] || { name, xuid: xuid || null, firstSeen: now };
-  existing.name = name;
+  existing.name = name; // keep latest-seen casing/name
   existing.lastSeen = now;
   existing.online = isOnline;
   players[key] = existing;
@@ -355,11 +383,15 @@ function pollServerLog() {
   }
 
   if (logReadOffset === null) {
+    // First run: don't replay the entire historical log, just start tracking from now.
     logReadOffset = size;
     return;
   }
 
-  if (size < logReadOffset) logReadOffset = 0;
+  if (size < logReadOffset) {
+    // Log file was rotated/truncated.
+    logReadOffset = 0;
+  }
   if (size === logReadOffset) return;
 
   const fd = fs.openSync(logPaths.out, 'r');
@@ -410,7 +442,7 @@ function getLastActivity() {
   return timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
 }
 
-// ---------- status & server control ----------
+// ---------- routes: status & server control ----------
 
 app.get('/api/status', (req, res) => {
   const proc = findPm2Process();
@@ -460,7 +492,15 @@ app.get('/api/server/properties', (req, res) => {
   }
 });
 
-// ---------- world ----------
+// ---------- jobs ----------
+
+app.get('/api/jobs/:id', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job no encontrado (o ya expiró).' });
+  res.json(job);
+});
+
+// ---------- routes: world ----------
 
 app.get('/api/world/download', (req, res) => {
   withLock(res, async () => {
@@ -485,11 +525,13 @@ app.post('/api/world/upload', upload.single('worldfile'), (req, res) => {
     const uploadedPath = req.file.path;
     const worldPath = getCurrentWorldPath();
 
+    // 1. Backup current world
     if (fs.existsSync(worldPath)) {
       const backupZip = path.join(BACKUPS_DIR, `world-backup-${timestamp()}.zip`);
       await zipDirToFile(worldPath, backupZip);
     }
 
+    // 2. Stop server
     let wasRunning = false;
     const proc = findPm2Process();
     if (proc && proc.pm2_env.status === 'online') {
@@ -499,11 +541,13 @@ app.post('/api/world/upload', upload.single('worldfile'), (req, res) => {
     }
 
     try {
+      // 3. Replace world contents
       await rmrf(worldPath);
       await fsp.mkdir(worldPath, { recursive: true });
       const zip = new AdmZip(uploadedPath);
       zip.extractAllTo(worldPath, true);
 
+      // Handle case where the zip has a single top-level folder wrapping the world
       const items = fs.readdirSync(worldPath);
       if (items.length === 1) {
         const onlyItem = path.join(worldPath, items[0]);
@@ -518,7 +562,11 @@ app.post('/api/world/upload', upload.single('worldfile'), (req, res) => {
       await rmrf(uploadedPath);
     }
 
-    if (wasRunning) pm2Action('start');
+    // 4. Restart server if it was running
+    if (wasRunning) {
+      pm2Action('start');
+    }
+
     res.json({ ok: true });
   });
 });
@@ -526,72 +574,102 @@ app.post('/api/world/upload', upload.single('worldfile'), (req, res) => {
 // Create a brand-new world from scratch with custom settings.
 // Flow: backup current world → stop → update server.properties → delete old
 // world folder(s) → start (server auto-generates a fresh world on boot).
+//
+// IMPORTANTE: esta operación puede tardar minutos (zipear el mundo, pm2 stop/start).
+// Para evitar 504 del reverse proxy, devolvemos un jobId inmediatamente y el
+// trabajo pesado se ejecuta en background. El cliente consulta /api/jobs/:id.
 app.post('/api/world/create', (req, res) => {
-  withLock(res, async () => {
-    const {
-      worldName,
-      gamemode = 'survival',
-      difficulty = 'normal',
-      seed = '',
-      allowCheats = true,
-      playerPermission = 'member',
-    } = req.body || {};
+  if (busy) {
+    return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
+  }
 
-    if (!worldName || !String(worldName).trim()) throw new Error('El nombre del mundo es obligatorio.');
-    const newName = String(worldName).trim();
-    if (/[\/\\]/.test(newName)) throw new Error('El nombre del mundo no puede contener "/" ni "\\".');
+  const {
+    worldName,
+    gamemode = 'survival',
+    difficulty = 'normal',
+    seed = '',
+    allowCheats = true,
+    playerPermission = 'member',
+  } = req.body || {};
 
-    const validGamemodes = ['survival', 'creative', 'adventure'];
-    const validDifficulties = ['peaceful', 'easy', 'normal', 'hard'];
-    const validPermissions = ['visitor', 'member', 'operator'];
-    if (!validGamemodes.includes(gamemode)) throw new Error('Modo de juego inválido.');
-    if (!validDifficulties.includes(difficulty)) throw new Error('Dificultad inválida.');
-    if (!validPermissions.includes(playerPermission)) throw new Error('Permiso por defecto inválido.');
+  // Validaciones rápidas — así el usuario ve errores sin esperar.
+  if (!worldName || !String(worldName).trim()) {
+    return res.status(400).json({ error: 'El nombre del mundo es obligatorio.' });
+  }
+  const newName = String(worldName).trim();
+  if (/[\/\\]/.test(newName)) {
+    return res.status(400).json({ error: 'El nombre del mundo no puede contener "/" ni "\\".' });
+  }
+  const validGamemodes = ['survival', 'creative', 'adventure'];
+  const validDifficulties = ['peaceful', 'easy', 'normal', 'hard'];
+  const validPermissions = ['visitor', 'member', 'operator'];
+  if (!validGamemodes.includes(gamemode)) return res.status(400).json({ error: 'Modo de juego inválido.' });
+  if (!validDifficulties.includes(difficulty)) return res.status(400).json({ error: 'Dificultad inválida.' });
+  if (!validPermissions.includes(playerPermission)) return res.status(400).json({ error: 'Permiso por defecto inválido.' });
 
-    const oldWorldPath = getCurrentWorldPath();
-    const newWorldPath = path.join(WORLDS_DIR, newName);
+  busy = true;
+  const jobId = createJob();
+  const job = jobs.get(jobId);
+  job.meta = { worldName: newName };
 
-    // 1. Backup current world
-    if (fs.existsSync(oldWorldPath)) {
-      const backupZip = path.join(BACKUPS_DIR, `world-backup-${timestamp()}.zip`);
-      await zipDirToFile(oldWorldPath, backupZip);
+  // Responder YA — el proxy no se queda esperando.
+  res.json({ ok: true, jobId, worldName: newName });
+
+  // Y hacer el trabajo pesado en background.
+  (async () => {
+    try {
+      const oldWorldPath = getCurrentWorldPath();
+      const newWorldPath = path.join(WORLDS_DIR, newName);
+
+      // 1. Backup current world
+      if (fs.existsSync(oldWorldPath)) {
+        const backupZip = path.join(BACKUPS_DIR, `world-backup-${timestamp()}.zip`);
+        await zipDirToFile(oldWorldPath, backupZip);
+      }
+
+      // 2. Stop server
+      let wasRunning = false;
+      const proc = findPm2Process();
+      if (proc && proc.pm2_env.status === 'online') {
+        wasRunning = true;
+        pm2Action('stop');
+        await sleep(1500);
+      }
+
+      // 3. Update server.properties
+      updateProperties({
+        'level-name': newName,
+        'gamemode': gamemode,
+        'difficulty': difficulty,
+        'allow-cheats': allowCheats ? 'true' : 'false',
+        'default-player-permission-level': playerPermission,
+        'level-seed': seed && String(seed).trim() !== '' ? String(seed).trim() : '',
+      });
+
+      // 4. Remove old folders so BDS generates fresh ones on boot.
+      // If target is a different folder that already exists, back it up first.
+      if (newWorldPath !== oldWorldPath && fs.existsSync(newWorldPath)) {
+        const backupZip = path.join(BACKUPS_DIR, `world-backup-${newName}-${timestamp()}.zip`);
+        await zipDirToFile(newWorldPath, backupZip);
+        await rmrf(newWorldPath);
+      }
+      await rmrf(oldWorldPath);
+
+      // 5. Start server (fresh world is generated on startup)
+      if (wasRunning) pm2Action('start');
+      pendingRestart = false;
+
+      job.status = 'done';
+      job.finishedAt = Date.now();
+    } catch (err) {
+      console.error('Error en /api/world/create:', err);
+      job.status = 'error';
+      job.error = err.message || String(err);
+      job.finishedAt = Date.now();
+    } finally {
+      busy = false;
     }
-
-    // 2. Stop server
-    let wasRunning = false;
-    const proc = findPm2Process();
-    if (proc && proc.pm2_env.status === 'online') {
-      wasRunning = true;
-      pm2Action('stop');
-      await sleep(1500);
-    }
-
-    // 3. Update server.properties
-    const updates = {
-      'level-name': newName,
-      'gamemode': gamemode,
-      'difficulty': difficulty,
-      'allow-cheats': allowCheats ? 'true' : 'false',
-      'default-player-permission-level': playerPermission,
-      'level-seed': seed && String(seed).trim() !== '' ? String(seed).trim() : '',
-    };
-    updateProperties(updates);
-
-    // 4. Remove old folders so BDS generates fresh ones on boot.
-    // If target is a different folder that already exists, back it up first.
-    if (newWorldPath !== oldWorldPath && fs.existsSync(newWorldPath)) {
-      const backupZip = path.join(BACKUPS_DIR, `world-backup-${newName}-${timestamp()}.zip`);
-      await zipDirToFile(newWorldPath, backupZip);
-      await rmrf(newWorldPath);
-    }
-    await rmrf(oldWorldPath);
-
-    // 5. Start server (fresh world is generated on startup)
-    if (wasRunning) pm2Action('start');
-    pendingRestart = false;
-
-    res.json({ ok: true, worldName: newName });
-  });
+  })();
 });
 
 app.get('/api/backups', (req, res) => {
@@ -621,7 +699,7 @@ app.delete('/api/backups/:file', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- addons ----------
+// ---------- routes: addons / texture packs ----------
 
 app.get('/api/addons', (req, res) => {
   const globalResourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR).map((p) => ({ ...p, location: 'global' }));
@@ -631,7 +709,7 @@ app.get('/api/addons', (req, res) => {
   const worldResourcePacks = listInstalledPacks(path.join(worldPath, 'resource_packs')).map((p) => ({
     ...p,
     location: 'world',
-    builtIn: false,
+    builtIn: false, // packs embedded in a world are never the server's built-in vanilla packs
   }));
   const worldBehaviorPacks = listInstalledPacks(path.join(worldPath, 'behavior_packs')).map((p) => ({
     ...p,
@@ -678,12 +756,13 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
     zip.extractAllTo(extractTmp, true);
     await rmrf(uploadedPath);
 
+    // Find every manifest.json inside (handles both .mcpack single-pack and .mcaddon multi-pack)
     const manifestDirs = [];
     function walk(dir) {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       if (entries.some((e) => e.isFile() && e.name === 'manifest.json')) {
         manifestDirs.push(dir);
-        return;
+        return; // don't descend further into a pack we already found
       }
       for (const e of entries) {
         if (e.isDirectory()) walk(path.join(dir, e.name));
@@ -706,6 +785,7 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
       await rmrf(targetDir);
       await fsp.rename(dir, targetDir);
 
+      // Apply to current world automatically
       const listFile = manifest.type === 'behavior' ? 'world_behavior_packs.json' : 'world_resource_packs.json';
       const list = readWorldPackList(listFile);
       const filtered = list.filter((p) => p.pack_id !== manifest.uuid);
@@ -750,6 +830,7 @@ app.delete('/api/addons/:type/:folder', (req, res) => {
   });
 });
 
+// Enable/disable a pack for the current world without deleting it from disk.
 app.post('/api/addons/:type/:folder/toggle', (req, res) => {
   withLock(res, async () => {
     const { type, folder } = req.params;
@@ -771,13 +852,16 @@ app.post('/api/addons/:type/:folder/toggle', (req, res) => {
     const list = readWorldPackList(listFile);
     const withoutThis = list.filter((p) => p.pack_id !== manifest.uuid);
 
-    if (enabled) withoutThis.push({ pack_id: manifest.uuid, version: manifest.version });
+    if (enabled) {
+      withoutThis.push({ pack_id: manifest.uuid, version: manifest.version });
+    }
     writeWorldPackList(listFile, withoutThis);
     pendingRestart = true;
     res.json({ ok: true });
   });
 });
 
+// Move a pack up/down in priority order within the current world's pack list.
 app.post('/api/addons/:type/reorder', (req, res) => {
   withLock(res, async () => {
     const { type } = req.params;
@@ -791,7 +875,9 @@ app.post('/api/addons/:type/reorder', (req, res) => {
     if (index === -1) throw new Error('Ese pack no está aplicado al mundo actual.');
 
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= list.length) return res.json({ ok: true });
+    if (targetIndex < 0 || targetIndex >= list.length) {
+      return res.json({ ok: true }); // already at the edge, nothing to do
+    }
     [list[index], list[targetIndex]] = [list[targetIndex], list[index]];
     writeWorldPackList(listFile, list);
     pendingRestart = true;
@@ -799,6 +885,7 @@ app.post('/api/addons/:type/reorder', (req, res) => {
   });
 });
 
+// Serve a pack's icon (pack_icon.png), falling back to 404 if it doesn't have one.
 app.get('/api/addons/icon', (req, res) => {
   const { type, location, folder } = req.query;
   if (!['resources', 'behavior'].includes(type)) return res.status(400).end();
@@ -814,7 +901,7 @@ app.get('/api/addons/icon', (req, res) => {
   res.sendFile(iconPath);
 });
 
-// ---------- console ----------
+// ---------- routes: console ----------
 
 app.get('/api/console/log', (req, res) => {
   const logPaths = getPm2LogPaths();
@@ -834,7 +921,7 @@ app.post('/api/console/send', (req, res) => {
   }
 });
 
-// ---------- players ----------
+// ---------- routes: players ----------
 
 app.get('/api/players', (req, res) => {
   const players = loadPlayers();

@@ -10,7 +10,10 @@ function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB'];
   let i = 0;
   let n = bytes;
-  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
   return `${n.toFixed(1)} ${units[i]}`;
 }
 
@@ -53,7 +56,8 @@ async function refreshStatus() {
       onlineContainer.innerHTML = '<p class="muted">Nadie está jugando ahora mismo.</p>';
     }
 
-    document.getElementById('lastActivity').textContent = data.lastActivity
+    const lastActivityEl = document.getElementById('lastActivity');
+    lastActivityEl.textContent = data.lastActivity
       ? `Última conexión: ${new Date(data.lastActivity).toLocaleString()}`
       : 'Todavía no hay registros de conexión.';
 
@@ -85,6 +89,7 @@ document.getElementById('btnStop').addEventListener('click', () => {
     serverAction('stop');
   }
 });
+
 document.getElementById('btnRestartFromBanner').addEventListener('click', () => serverAction('restart'));
 
 // ---------- World download / upload ----------
@@ -130,12 +135,15 @@ async function loadServerProperties() {
     document.getElementById('cwSeed').value = p.seed || '';
     document.getElementById('cwCheats').value = p.allowCheats ? 'true' : 'false';
     document.getElementById('cwPermission').value = p.playerPermission || 'member';
-  } catch (e) { /* silencioso */ }
+  } catch (e) {
+    /* silencioso */
+  }
 }
 
 document.getElementById('formCreateWorld').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = document.getElementById('createWorldMsg');
+  const submitBtn = e.target.querySelector('button[type="submit"]');
   const name = document.getElementById('cwName').value.trim();
   if (!name) {
     msg.textContent = 'Ponle un nombre al mundo.';
@@ -153,21 +161,43 @@ document.getElementById('formCreateWorld').addEventListener('submit', async (e) 
     playerPermission: document.getElementById('cwPermission').value,
   };
 
-  msg.textContent = 'Creando mundo nuevo… (puede tardar unos segundos)';
+  submitBtn.disabled = true;
+  msg.textContent = 'Iniciando creación del mundo…';
   msg.className = 'msg';
+
   try {
-    await api('api/world/create', {
+    const { jobId } = await api('api/world/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    msg.textContent = '¡Mundo creado! El servidor está regenerando el mundo.';
-    msg.className = 'msg success';
-    setTimeout(refreshStatus, 2000);
-    loadBackups();
+
+    // Polling cada 2s hasta que el job termine
+    let done = false;
+    while (!done) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const job = await api(`api/jobs/${encodeURIComponent(jobId)}`);
+      if (job.status === 'done') {
+        msg.textContent = '¡Mundo creado! El servidor está regenerando el mundo.';
+        msg.className = 'msg success';
+        done = true;
+        setTimeout(refreshStatus, 2000);
+        loadBackups();
+      } else if (job.status === 'error') {
+        msg.textContent = `Error: ${job.error}`;
+        msg.className = 'msg error';
+        done = true;
+      } else {
+        const secs = Math.round((Date.now() - job.startedAt) / 1000);
+        msg.textContent = `Creando mundo… (${secs}s) — no cierres esta pestaña.`;
+        msg.className = 'msg';
+      }
+    }
   } catch (err) {
     msg.textContent = err.message;
     msg.className = 'msg error';
+  } finally {
+    submitBtn.disabled = false;
   }
 });
 
@@ -298,11 +328,12 @@ function renderAddonLists() {
 }
 
 async function loadAddons() {
+  const resContainer = document.getElementById('resourcePacksList');
   try {
     lastAddonsData = await api('api/addons');
     renderAddonLists();
   } catch (e) {
-    document.getElementById('resourcePacksList').textContent = e.message;
+    resContainer.textContent = e.message;
   }
 }
 
@@ -380,7 +411,9 @@ function skinTextureUrl(player) {
 function closeSkinModal() {
   document.getElementById('skinModal').style.display = 'none';
   if (currentSkinViewer) {
-    try { currentSkinViewer.dispose(); } catch (e) {}
+    try {
+      currentSkinViewer.dispose();
+    } catch (e) {}
     currentSkinViewer = null;
   }
 }
@@ -395,7 +428,9 @@ async function openSkinModal(player) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (currentSkinViewer) {
-    try { currentSkinViewer.dispose(); } catch (e) {}
+    try {
+      currentSkinViewer.dispose();
+    } catch (e) {}
     currentSkinViewer = null;
   }
 
@@ -452,7 +487,9 @@ async function loadPlayers() {
           p.banned ? '<span class="tag" style="background:rgba(240,87,107,0.15);color:var(--red);">Baneado</span>' : '',
           p.isOp ? '<span class="tag" style="background:rgba(255,169,77,0.15);color:var(--orange);">Admin</span>' : '',
           p.allowlisted ? '<span class="tag">Allowlist</span>' : '',
-        ].filter(Boolean).join(' ');
+        ]
+          .filter(Boolean)
+          .join(' ');
         const safeName = p.name.replace(/"/g, '&quot;');
         const skinUrl = skinAvatarUrl(p);
         const fallback = `https://mc-heads.net/avatar/MHF_Steve/40`;
@@ -478,12 +515,16 @@ async function loadPlayers() {
           </div>
           <div class="player-actions">
             ${p.online ? `<button class="btn-mini-kick" data-action="kick" data-name="${safeName}">Expulsar</button>` : ''}
-            ${p.isOp
-              ? `<button class="btn-mini-unban" data-action="deop" data-name="${safeName}">Quitar admin</button>`
-              : `<button class="btn-mini-kick" data-action="op" data-name="${safeName}">Dar admin</button>`}
-            ${p.banned
-              ? `<button class="btn-mini-unban" data-action="unban" data-name="${safeName}">Desbanear</button>`
-              : `<button class="btn-mini-ban" data-action="ban" data-name="${safeName}">Banear</button>`}
+            ${
+              p.isOp
+                ? `<button class="btn-mini-unban" data-action="deop" data-name="${safeName}">Quitar admin</button>`
+                : `<button class="btn-mini-kick" data-action="op" data-name="${safeName}">Dar admin</button>`
+            }
+            ${
+              p.banned
+                ? `<button class="btn-mini-unban" data-action="unban" data-name="${safeName}">Desbanear</button>`
+                : `<button class="btn-mini-ban" data-action="ban" data-name="${safeName}">Banear</button>`
+            }
           </div>
         </div>`;
       })
