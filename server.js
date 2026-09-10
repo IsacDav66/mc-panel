@@ -266,9 +266,8 @@ function readManifest(dir) {
   try {
     let raw = fs.readFileSync(manifestPath, 'utf8');
 
-    // Quitar BOM UTF-8 (los packs del sistema del BDS lo llevan)
+    // Quitar BOM UTF-8 (los packs internos del BDS lo llevan)
     if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
-    // Quitar BOM UTF-16 si por lo que sea llega así
     raw = raw.replace(/^\uFEFF/, '').trim();
 
     const data = JSON.parse(raw);
@@ -317,11 +316,9 @@ function listInstalledPacks(baseDir) {
   return entries.map((e) => {
     const dir = path.join(baseDir, e.name);
     const manifest = readManifest(dir);
-    const builtInByFolder = BUILTIN_FOLDER_PATTERN.test(e.name);
+    const builtInByFolder = isBuiltInFolder(e.name);
 
     if (!manifest) {
-      // Aunque no podamos leer el manifest, seguimos marcando builtIn correctamente
-      // según el nombre de la carpeta, para que el filtro funcione.
       return {
         folder: e.name,
         builtIn: builtInByFolder,
