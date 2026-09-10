@@ -34,16 +34,30 @@ async function refreshStatus() {
       pill.textContent = 'No encontrado';
       pill.className = 'pill pill-unknown';
       details.textContent = `No se encontró el proceso PM2. Revisa el nombre configurado en el panel.`;
-      return;
+    } else {
+      const online = data.status === 'online';
+      pill.textContent = online ? 'En línea' : 'Detenido';
+      pill.className = `pill ${online ? 'pill-online' : 'pill-stopped'}`;
+      details.innerHTML = `
+        Mundo: <strong>${data.levelName}</strong><br/>
+        Uptime: ${formatUptime(data.uptimeMs)} · Reinicios: ${data.restarts} · RAM: ${formatBytes(data.memory)}
+      `;
+      document.getElementById('worldName').textContent = data.levelName;
     }
-    const online = data.status === 'online';
-    pill.textContent = online ? 'En línea' : 'Detenido';
-    pill.className = `pill ${online ? 'pill-online' : 'pill-stopped'}`;
-    details.innerHTML = `
-      Mundo: <strong>${data.levelName}</strong><br/>
-      Uptime: ${formatUptime(data.uptimeMs)} · Reinicios: ${data.restarts} · RAM: ${formatBytes(data.memory)}
-    `;
-    document.getElementById('worldName').textContent = data.levelName;
+
+    const onlineContainer = document.getElementById('onlinePlayersList');
+    if (data.onlinePlayers && data.onlinePlayers.length > 0) {
+      onlineContainer.innerHTML = data.onlinePlayers
+        .map((p) => `<div class="list-item"><div>🟢 ${p.name}</div></div>`)
+        .join('');
+    } else {
+      onlineContainer.innerHTML = '<p class="muted">Nadie está jugando ahora mismo.</p>';
+    }
+
+    const lastActivityEl = document.getElementById('lastActivity');
+    lastActivityEl.textContent = data.lastActivity
+      ? `Última conexión: ${new Date(data.lastActivity).toLocaleString()}`
+      : 'Todavía no hay registros de conexión.';
   } catch (e) {
     pill.textContent = 'Error';
     pill.className = 'pill pill-unknown';
@@ -139,6 +153,11 @@ async function loadBackups() {
 
 let lastAddonsData = null;
 
+function iconUrl(p) {
+  const type = p.type === 'behavior' ? 'behavior' : 'resources';
+  return `/api/addons/icon?type=${type}&location=${p.location}&folder=${encodeURIComponent(p.folder)}`;
+}
+
 function renderAddonLists() {
   if (!lastAddonsData) return;
   const showSystem = document.getElementById('showSystemPacks').checked;
@@ -156,12 +175,21 @@ function renderAddonLists() {
       .map((p) => {
         const versionText = Array.isArray(p.version) ? p.version.join('.') : String(p.version || '?');
         return `
-      <div class="list-item">
-        <div>
-          ${p.name} ${p.appliedToWorld ? '<span class="tag">Aplicado al mundo</span>' : ''} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''}
+      <div class="pack-item">
+        <img class="pack-icon" src="${iconUrl(p)}" onerror="this.style.visibility='hidden'" alt="" />
+        <div class="pack-info">
+          <div>${p.name} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''}</div>
           <div class="meta">v${versionText} · ${p.description || ''}</div>
         </div>
-        <button class="icon-btn" data-type="${type}" data-folder="${p.folder}" data-location="${p.location}">Eliminar</button>
+        <div class="pack-actions">
+          <button class="order-btn" data-action="up" data-type="${type}" data-uuid="${p.uuid}" ${!p.appliedToWorld || p.isFirst ? 'disabled' : ''}>▲</button>
+          <button class="order-btn" data-action="down" data-type="${type}" data-uuid="${p.uuid}" ${!p.appliedToWorld || p.isLast ? 'disabled' : ''}>▼</button>
+          <label class="switch" title="Activar/desactivar para el mundo actual">
+            <input type="checkbox" data-toggle="${type}" data-folder="${p.folder}" data-location="${p.location}" ${p.appliedToWorld ? 'checked' : ''} />
+            <span class="slider"></span>
+          </label>
+          <button class="icon-btn" data-type="${type}" data-folder="${p.folder}" data-location="${p.location}">Eliminar</button>
+        </div>
       </div>`;
       })
       .join('');
@@ -177,6 +205,37 @@ function renderAddonLists() {
       loadAddons();
     });
   });
+
+  document.querySelectorAll('input[data-toggle]').forEach((input) => {
+    input.addEventListener('change', async () => {
+      try {
+        await api(`/api/addons/${input.dataset.toggle}/${encodeURIComponent(input.dataset.folder)}/toggle`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location: input.dataset.location, enabled: input.checked }),
+        });
+        loadAddons();
+      } catch (e) {
+        alert(e.message);
+        input.checked = !input.checked;
+      }
+    });
+  });
+
+  document.querySelectorAll('.order-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        await api(`/api/addons/${btn.dataset.type}/reorder`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uuid: btn.dataset.uuid, direction: btn.dataset.action }),
+        });
+        loadAddons();
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+  });
 }
 
 async function loadAddons() {
@@ -190,6 +249,106 @@ async function loadAddons() {
 }
 
 document.getElementById('showSystemPacks').addEventListener('change', renderAddonLists);
+
+// ---------- Console ----------
+
+async function refreshConsole() {
+  const output = document.getElementById('consoleOutput');
+  try {
+    const data = await api('/api/console/log?lines=200');
+    const wasAtBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 20;
+    output.textContent = data.found ? data.log || '(sin salida todavía)' : 'No se encontró el proceso del servidor.';
+    if (wasAtBottom) output.scrollTop = output.scrollHeight;
+  } catch (e) {
+    output.textContent = e.message;
+  }
+}
+
+document.getElementById('formConsoleSend').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('consoleInput');
+  const command = input.value.trim();
+  if (!command) return;
+  input.value = '';
+  try {
+    await api('/api/console/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command }),
+    });
+    setTimeout(refreshConsole, 800);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+// ---------- Players ----------
+
+async function loadPlayers() {
+  const container = document.getElementById('playersTable');
+  try {
+    const players = await api('/api/players');
+    if (players.length === 0) {
+      container.innerHTML = '<p class="muted">Todavía nadie se ha conectado.</p>';
+      return;
+    }
+    const header = `
+      <div class="players-table-header">
+        <div>Jugador</div><div>Primera vez</div><div>Última vez</div><div>Estado</div><div>Acciones</div>
+      </div>`;
+    const rows = players
+      .map((p) => {
+        const statusBadges = [
+          p.online ? '<span class="tag" style="background:rgba(62,207,142,0.15);color:var(--green);">En línea</span>' : '',
+          p.banned ? '<span class="tag" style="background:rgba(240,87,107,0.15);color:var(--red);">Baneado</span>' : '',
+          p.allowlisted ? '<span class="tag">Allowlist</span>' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return `
+        <div class="player-row">
+          <div>${p.name}</div>
+          <div class="meta">${p.firstSeen ? new Date(p.firstSeen).toLocaleDateString() : '—'}</div>
+          <div class="meta">${p.lastSeen ? new Date(p.lastSeen).toLocaleString() : '—'}</div>
+          <div>${statusBadges || '—'}</div>
+          <div class="player-actions">
+            ${p.online ? `<button class="btn-mini-kick" data-action="kick" data-name="${p.name}">Expulsar</button>` : ''}
+            ${
+              p.banned
+                ? `<button class="btn-mini-unban" data-action="unban" data-name="${p.name}">Desbanear</button>`
+                : `<button class="btn-mini-ban" data-action="ban" data-name="${p.name}">Banear</button>`
+            }
+          </div>
+        </div>`;
+      })
+      .join('');
+    container.innerHTML = header + rows;
+
+    container.querySelectorAll('button[data-action]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const { action, name } = btn.dataset;
+        if (action === 'ban') {
+          const reason = prompt(`Razón del ban para ${name} (opcional):`, '') || '';
+          if (!confirm(`¿Banear a ${name}?`)) return;
+          await api(`/api/players/${encodeURIComponent(name)}/ban`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          });
+        } else if (action === 'unban') {
+          if (!confirm(`¿Desbanear a ${name}?`)) return;
+          await api(`/api/players/${encodeURIComponent(name)}/unban`, { method: 'POST' });
+        } else if (action === 'kick') {
+          if (!confirm(`¿Expulsar a ${name}?`)) return;
+          await api(`/api/players/${encodeURIComponent(name)}/kick`, { method: 'POST' });
+        }
+        setTimeout(loadPlayers, 500);
+      });
+    });
+  } catch (e) {
+    container.textContent = e.message;
+  }
+}
 
 document.getElementById('formAddonUpload').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -217,4 +376,8 @@ document.getElementById('formAddonUpload').addEventListener('submit', async (e) 
 refreshStatus();
 loadBackups();
 loadAddons();
+refreshConsole();
+loadPlayers();
 setInterval(refreshStatus, 8000);
+setInterval(refreshConsole, 5000);
+setInterval(loadPlayers, 15000);
