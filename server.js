@@ -378,17 +378,31 @@ app.delete('/api/backups/:file', (req, res) => {
 // ---------- routes: addons / texture packs ----------
 
 app.get('/api/addons', (req, res) => {
-  const resourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR);
-  const behaviorPacks = listInstalledPacks(BEHAVIOR_PACKS_DIR);
+  const globalResourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR).map((p) => ({ ...p, location: 'global' }));
+  const globalBehaviorPacks = listInstalledPacks(BEHAVIOR_PACKS_DIR).map((p) => ({ ...p, location: 'global' }));
+
+  const worldPath = getCurrentWorldPath();
+  const worldResourcePacks = listInstalledPacks(path.join(worldPath, 'resource_packs')).map((p) => ({
+    ...p,
+    location: 'world',
+    builtIn: false, // packs embedded in a world are never the server's built-in vanilla packs
+  }));
+  const worldBehaviorPacks = listInstalledPacks(path.join(worldPath, 'behavior_packs')).map((p) => ({
+    ...p,
+    location: 'world',
+    builtIn: false,
+  }));
+
   const appliedResources = readWorldPackList('world_resource_packs.json');
   const appliedBehaviors = readWorldPackList('world_behavior_packs.json');
-
   const appliedResourceUuids = new Set(appliedResources.map((p) => p.pack_id));
   const appliedBehaviorUuids = new Set(appliedBehaviors.map((p) => p.pack_id));
 
+  const withApplied = (list, set) => list.map((p) => ({ ...p, appliedToWorld: set.has(p.uuid) }));
+
   res.json({
-    resourcePacks: resourcePacks.map((p) => ({ ...p, appliedToWorld: appliedResourceUuids.has(p.uuid) })),
-    behaviorPacks: behaviorPacks.map((p) => ({ ...p, appliedToWorld: appliedBehaviorUuids.has(p.uuid) })),
+    resourcePacks: [...withApplied(globalResourcePacks, appliedResourceUuids), ...withApplied(worldResourcePacks, appliedResourceUuids)],
+    behaviorPacks: [...withApplied(globalBehaviorPacks, appliedBehaviorUuids), ...withApplied(worldBehaviorPacks, appliedBehaviorUuids)],
   });
 });
 
@@ -450,8 +464,14 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
 app.delete('/api/addons/:type/:folder', (req, res) => {
   withLock(res, async () => {
     const { type, folder } = req.params;
+    const location = req.query.location === 'world' ? 'world' : 'global';
     if (!['resources', 'behavior'].includes(type)) throw new Error('Tipo inválido');
-    const baseDir = type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
+    const baseDir =
+      location === 'world'
+        ? path.join(getCurrentWorldPath(), type === 'behavior' ? 'behavior_packs' : 'resource_packs')
+        : type === 'behavior'
+        ? BEHAVIOR_PACKS_DIR
+        : RESOURCE_PACKS_DIR;
     const safeFolder = path.basename(folder);
     const dir = path.join(baseDir, safeFolder);
     if (!fs.existsSync(dir)) throw new Error('No existe ese addon.');

@@ -146,6 +146,11 @@ input[type="file"] {
   color: var(--muted);
 }
 
+.tag-world {
+  background: rgba(255,169,77,0.15);
+  color: var(--orange);
+}
+
 .icon-btn {
   background: none;
   border: none;

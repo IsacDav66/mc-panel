@@ -158,10 +158,10 @@ function renderAddonLists() {
         return `
       <div class="list-item">
         <div>
-          ${p.name} ${p.appliedToWorld ? '<span class="tag">Aplicado al mundo</span>' : ''} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''}
+          ${p.name} ${p.appliedToWorld ? '<span class="tag">Aplicado al mundo</span>' : ''} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''}
           <div class="meta">v${versionText} · ${p.description || ''}</div>
         </div>
-        <button class="icon-btn" data-type="${type}" data-folder="${p.folder}">Eliminar</button>
+        <button class="icon-btn" data-type="${type}" data-folder="${p.folder}" data-location="${p.location}">Eliminar</button>
       </div>`;
       })
       .join('');
@@ -173,7 +173,7 @@ function renderAddonLists() {
   document.querySelectorAll('.icon-btn[data-folder]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!confirm('¿Eliminar este addon/texture pack?')) return;
-      await api(`/api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}`, { method: 'DELETE' });
+      await api(`/api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}?location=${btn.dataset.location}`, { method: 'DELETE' });
       loadAddons();
     });
   });
