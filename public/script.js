@@ -29,7 +29,7 @@ async function refreshStatus() {
   const pill = document.getElementById('statusPill');
   const details = document.getElementById('statusDetails');
   try {
-    const data = await api('/api/status');
+    const data = await api('api/status');
     if (!data.found) {
       pill.textContent = 'No encontrado';
       pill.className = 'pill pill-unknown';
@@ -71,7 +71,7 @@ async function serverAction(action) {
   const buttons = ['btnStart', 'btnRestart', 'btnStop'].map((id) => document.getElementById(id));
   buttons.forEach((b) => (b.disabled = true));
   try {
-    await api(`/api/server/${action}`, { method: 'POST' });
+    await api(`api/server/${action}`, { method: 'POST' });
     setTimeout(refreshStatus, 1500);
   } catch (e) {
     alert(e.message);
@@ -91,7 +91,7 @@ document.getElementById('btnStop').addEventListener('click', () => {
 document.getElementById('btnRestartFromBanner').addEventListener('click', () => serverAction('restart'));
 
 document.getElementById('btnDownloadWorld').addEventListener('click', () => {
-  window.location.href = '/api/world/download';
+  window.location.href = 'api/world/download';
 });
 
 document.getElementById('formWorldUpload').addEventListener('submit', async (e) => {
@@ -108,7 +108,7 @@ document.getElementById('formWorldUpload').addEventListener('submit', async (e) 
   msg.textContent = 'Subiendo y reemplazando mundo, esto puede tardar…';
   msg.className = 'msg';
   try {
-    await api('/api/world/upload', { method: 'POST', body: formData });
+    await api('api/world/upload', { method: 'POST', body: formData });
     msg.textContent = '¡Mundo reemplazado con éxito!';
     msg.className = 'msg success';
     fileInput.value = '';
@@ -123,7 +123,7 @@ document.getElementById('formWorldUpload').addEventListener('submit', async (e) 
 async function loadBackups() {
   const container = document.getElementById('backupsList');
   try {
-    const backups = await api('/api/backups');
+    const backups = await api('api/backups');
     if (backups.length === 0) {
       container.innerHTML = '<p class="muted">Todavía no hay backups.</p>';
       return;
@@ -137,7 +137,7 @@ async function loadBackups() {
           <div class="meta">${formatBytes(b.sizeBytes)} · ${new Date(b.createdAt).toLocaleString()}</div>
         </div>
         <div>
-          <a href="/api/backups/${encodeURIComponent(b.name)}" class="btn btn-blue" style="padding:6px 10px;font-size:12px;">Descargar</a>
+          <a href="api/backups/${encodeURIComponent(b.name)}" class="btn btn-blue" style="padding:6px 10px;font-size:12px;">Descargar</a>
           <button class="icon-btn" data-file="${b.name}">Eliminar</button>
         </div>
       </div>`
@@ -146,7 +146,7 @@ async function loadBackups() {
     container.querySelectorAll('.icon-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
         if (!confirm(`¿Eliminar el backup ${btn.dataset.file}?`)) return;
-        await api(`/api/backups/${encodeURIComponent(btn.dataset.file)}`, { method: 'DELETE' });
+        await api(`api/backups/${encodeURIComponent(btn.dataset.file)}`, { method: 'DELETE' });
         loadBackups();
       });
     });
@@ -159,7 +159,7 @@ let lastAddonsData = null;
 
 function iconUrl(p) {
   const type = p.type === 'behavior' ? 'behavior' : 'resources';
-  return `/api/addons/icon?type=${type}&location=${p.location}&folder=${encodeURIComponent(p.folder)}`;
+  return `api/addons/icon?type=${type}&location=${p.location}&folder=${encodeURIComponent(p.folder)}`;
 }
 
 function renderAddonLists() {
@@ -205,7 +205,7 @@ function renderAddonLists() {
   document.querySelectorAll('.icon-btn[data-folder]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!confirm('¿Eliminar este addon/texture pack?')) return;
-      await api(`/api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}?location=${btn.dataset.location}`, { method: 'DELETE' });
+      await api(`api/addons/${btn.dataset.type}/${encodeURIComponent(btn.dataset.folder)}?location=${btn.dataset.location}`, { method: 'DELETE' });
       loadAddons();
     });
   });
@@ -213,7 +213,7 @@ function renderAddonLists() {
   document.querySelectorAll('input[data-toggle]').forEach((input) => {
     input.addEventListener('change', async () => {
       try {
-        await api(`/api/addons/${input.dataset.toggle}/${encodeURIComponent(input.dataset.folder)}/toggle`, {
+        await api(`api/addons/${input.dataset.toggle}/${encodeURIComponent(input.dataset.folder)}/toggle`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ location: input.dataset.location, enabled: input.checked }),
@@ -229,7 +229,7 @@ function renderAddonLists() {
   document.querySelectorAll('.order-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
       try {
-        await api(`/api/addons/${btn.dataset.type}/reorder`, {
+        await api(`api/addons/${btn.dataset.type}/reorder`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ uuid: btn.dataset.uuid, direction: btn.dataset.action }),
@@ -245,7 +245,7 @@ function renderAddonLists() {
 async function loadAddons() {
   const resContainer = document.getElementById('resourcePacksList');
   try {
-    lastAddonsData = await api('/api/addons');
+    lastAddonsData = await api('api/addons');
     renderAddonLists();
   } catch (e) {
     resContainer.textContent = e.message;
@@ -259,7 +259,7 @@ document.getElementById('showSystemPacks').addEventListener('change', renderAddo
 async function refreshConsole() {
   const output = document.getElementById('consoleOutput');
   try {
-    const data = await api('/api/console/log?lines=200');
+    const data = await api('api/console/log?lines=200');
     const wasAtBottom = output.scrollTop + output.clientHeight >= output.scrollHeight - 20;
     output.textContent = data.found ? data.log || '(sin salida todavía)' : 'No se encontró el proceso del servidor.';
     if (wasAtBottom) output.scrollTop = output.scrollHeight;
@@ -275,7 +275,7 @@ document.getElementById('formConsoleSend').addEventListener('submit', async (e) 
   if (!command) return;
   input.value = '';
   try {
-    await api('/api/console/send', {
+    await api('api/console/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command }),
@@ -291,7 +291,7 @@ document.getElementById('formConsoleSend').addEventListener('submit', async (e) 
 async function loadPlayers() {
   const container = document.getElementById('playersTable');
   try {
-    const players = await api('/api/players');
+    const players = await api('api/players');
     if (players.length === 0) {
       container.innerHTML = '<p class="muted">Todavía nadie se ha conectado.</p>';
       return;
@@ -334,17 +334,17 @@ async function loadPlayers() {
         if (action === 'ban') {
           const reason = prompt(`Razón del ban para ${name} (opcional):`, '') || '';
           if (!confirm(`¿Banear a ${name}?`)) return;
-          await api(`/api/players/${encodeURIComponent(name)}/ban`, {
+          await api(`api/players/${encodeURIComponent(name)}/ban`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reason }),
           });
         } else if (action === 'unban') {
           if (!confirm(`¿Desbanear a ${name}?`)) return;
-          await api(`/api/players/${encodeURIComponent(name)}/unban`, { method: 'POST' });
+          await api(`api/players/${encodeURIComponent(name)}/unban`, { method: 'POST' });
         } else if (action === 'kick') {
           if (!confirm(`¿Expulsar a ${name}?`)) return;
-          await api(`/api/players/${encodeURIComponent(name)}/kick`, { method: 'POST' });
+          await api(`api/players/${encodeURIComponent(name)}/kick`, { method: 'POST' });
         }
         setTimeout(loadPlayers, 500);
       });
@@ -366,7 +366,7 @@ document.getElementById('formAddonUpload').addEventListener('submit', async (e) 
   msg.textContent = 'Instalando addon…';
   msg.className = 'msg';
   try {
-    const result = await api('/api/addons/upload', { method: 'POST', body: formData });
+    const result = await api('api/addons/upload', { method: 'POST', body: formData });
     msg.textContent = `Instalado: ${result.installed.map((p) => p.name).join(', ')}. Reinicia el servidor para aplicar cambios.`;
     msg.className = 'msg success';
     fileInput.value = '';
