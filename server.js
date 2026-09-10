@@ -933,41 +933,127 @@ app.get('/api/addons', (req, res) => {
   });
 });
 
+
+// -----------------------------------------------------------------
+// Extracción recursiva de zips anidados (.mcaddon → .mcpack → ...)
+// -----------------------------------------------------------------
+
+const MAX_NESTED_DEPTH = 6;
+
+async function extractNestedZips(rootDir, depth = 0) {
+  if (depth > MAX_NESTED_DEPTH) return;
+
+  let entries;
+  try {
+    entries = fs.readdirSync(rootDir, { withFileTypes: true });
+  } catch (e) {
+    return;
+  }
+
+  for (const entry of entries) {
+    const fullPath = path.join(rootDir, entry.name);
+
+    if (entry.isDirectory()) {
+      await extractNestedZips(fullPath, depth);
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+
+    const lower = entry.name.toLowerCase();
+    const isZipLike =
+      lower.endsWith('.mcpack') ||
+      lower.endsWith('.mcaddon') ||
+      lower.endsWith('.mctemplate') ||
+      lower.endsWith('.zip');
+
+    if (!isZipLike) continue;
+
+    // Extraer en una carpeta hermana con nombre único
+    const baseName = path.basename(entry.name, path.extname(entry.name));
+    const extractDir = path.join(
+      rootDir,
+      `__extracted_${baseName}_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`
+    );
+
+    try {
+      const nestedZip = new AdmZip(fullPath);
+      nestedZip.getEntries(); // valida que es un zip real (lanza si no lo es)
+      await fsp.mkdir(extractDir, { recursive: true });
+      nestedZip.extractAllTo(extractDir, true);
+      await fsp.unlink(fullPath); // borrar el .mcpack original ya extraído
+      await extractNestedZips(extractDir, depth + 1);
+    } catch (e) {
+      // No era un zip válido — limpiamos y dejamos el archivo como está
+      await rmrf(extractDir).catch(() => {});
+    }
+  }
+}
+
+// Devuelve todos los directorios que contienen un manifest.json,
+// sin descender más allá de un manifest ya encontrado (un pack es un árbol).
+function findManifestDirs(rootDir) {
+  const result = [];
+
+  function walk(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (e) {
+      return;
+    }
+
+    const hasManifest = entries.some((e) => e.isFile() && e.name === 'manifest.json');
+    if (hasManifest) {
+      result.push(dir);
+      return; // no descendemos más: ya es un pack
+    }
+
+    for (const e of entries) {
+      if (e.isDirectory() && !e.name.startsWith('.')) {
+        walk(path.join(dir, e.name));
+      }
+    }
+  }
+
+  walk(rootDir);
+  return result;
+}
+
+
 app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
   withLock(res, async () => {
     if (!req.file) throw new Error('No se recibió ningún archivo.');
     const uploadedPath = req.file.path;
-    const extractTmp = path.join(UPLOAD_TMP, `addon-extract-${timestamp()}`);
+    const extractTmp = path.join(
+      UPLOAD_TMP,
+      `addon-extract-${timestamp()}-${crypto.randomBytes(4).toString('hex')}`
+    );
     await fsp.mkdir(extractTmp, { recursive: true });
 
-    const zip = new AdmZip(uploadedPath);
-    zip.extractAllTo(extractTmp, true);
-    await rmrf(uploadedPath);
-
-    // Buscar TODOS los manifest.json (incluido el root, por si el .mcaddon
-    // no envuelve el pack en una subcarpeta).
-    const manifestDirs = [];
-    function walk(dir) {
-      let entries;
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch (e) {
-        return;
-      }
-      if (entries.some((e) => e.isFile() && e.name === 'manifest.json')) {
-        manifestDirs.push(dir);
-      }
-      for (const e of entries) {
-        if (e.isDirectory() && !e.name.startsWith('.')) {
-          walk(path.join(dir, e.name));
-        }
-      }
+    // 1. Extraer el archivo subido (puede ser .mcaddon, .mcpack o .zip)
+    try {
+      const outerZip = new AdmZip(uploadedPath);
+      outerZip.getEntries(); // valida
+      outerZip.extractAllTo(extractTmp, true);
+    } catch (e) {
+      await rmrf(extractTmp).catch(() => {});
+      await rmrf(uploadedPath).catch(() => {});
+      throw new Error('El archivo no es un ZIP válido (.mcaddon, .mcpack o .zip).');
     }
-    walk(extractTmp);
+    await rmrf(uploadedPath).catch(() => {});
+
+    // 2. Extraer recursivamente .mcpack / .mcaddon / .zip que haya dentro
+    await extractNestedZips(extractTmp, 0);
+
+    // 3. Buscar TODOS los manifest.json en el árbol resultante
+    const manifestDirs = findManifestDirs(extractTmp);
 
     if (manifestDirs.length === 0) {
       await rmrf(extractTmp);
-      throw new Error('No se encontró ningún manifest.json — el archivo no parece ser un addon/texture pack válido.');
+      throw new Error(
+        'No se encontró ningún manifest.json dentro del archivo. No parece ser un addon válido.'
+      );
     }
 
     const installed = [];
@@ -985,34 +1071,45 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
       const manifest = readManifest(dir);
 
       if (!manifest) {
-        skipped.push({ dir: path.relative(extractTmp, dir) || '.', reason: 'manifest.json ilegible' });
+        skipped.push({
+          dir: path.relative(extractTmp, dir) || '.',
+          reason: 'manifest.json ilegible',
+        });
         continue;
       }
       if (!manifest.uuid) {
-        skipped.push({ dir: path.relative(extractTmp, dir) || '.', reason: 'falta header.uuid' });
+        skipped.push({
+          dir: path.relative(extractTmp, dir) || '.',
+          reason: 'falta header.uuid',
+        });
         continue;
       }
 
-      const targetBase = manifest.type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
+      const targetBase =
+        manifest.type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
       const folderName = `${manifest.name.replace(/[^a-z0-9_\-]/gi, '_')}-${manifest.uuid}`;
       const targetDir = path.join(targetBase, folderName);
 
       try {
         await rmrf(targetDir);
-
-        // ⚠️ IMPORTANTE: copiar en lugar de renombrar (evita EXDEV entre /tmp y el disco).
+        // cp en lugar de rename para evitar EXDEV entre /tmp (tmpfs) y el disco
         await fsp.cp(dir, targetDir, { recursive: true, force: true });
         await rmrf(dir);
       } catch (e) {
         skipped.push({
           dir: path.relative(extractTmp, dir) || '.',
-          reason: `no se pudo mover a ${manifest.type === 'behavior' ? 'behavior_packs' : 'resource_packs'}: ${e.message}`,
+          reason: `no se pudo mover a ${
+            manifest.type === 'behavior' ? 'behavior_packs' : 'resource_packs'
+          }: ${e.message}`,
         });
         continue;
       }
 
       // Aplicar al mundo actual
-      const listFile = manifest.type === 'behavior' ? 'world_behavior_packs.json' : 'world_resource_packs.json';
+      const listFile =
+        manifest.type === 'behavior'
+          ? 'world_behavior_packs.json'
+          : 'world_resource_packs.json';
       try {
         const list = readWorldPackList(listFile);
         const filtered = list.filter((p) => p.pack_id !== manifest.uuid);
@@ -1036,7 +1133,7 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
       });
     }
 
-    await rmrf(extractTmp);
+    await rmrf(extractTmp).catch(() => {});
     if (installed.length > 0) pendingRestart = true;
 
     res.json({ ok: true, installed, skipped });
