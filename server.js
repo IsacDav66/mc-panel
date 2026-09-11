@@ -507,21 +507,28 @@ async function getLatestBedrockDownload() {
 }
 
 function getCurrentBedrockVersion() {
-  // 1. Intentar leer version.json (formato oficial del BDS)
+  // 1. version.json (formato oficial del BDS)
   const versionFile = path.join(BEDROCK_DIR, 'version.json');
   if (fs.existsSync(versionFile)) {
     try {
       const data = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
-      // El archivo puede tener la clave "version" o "serverVersion"
       return data.version || data.serverVersion || null;
-    } catch (e) {
-      // Si falla el parseo, continuamos con el siguiente método
-    }
+    } catch (e) {}
   }
 
-  // 2. Fallback: extraer la versión del nombre del archivo bedrock_server
-  //    Normalmente el binario se llama "bedrock_server" y la versión está en el log o en el nombre del zip original.
-  //    Una forma fiable es buscar en la carpeta un archivo como "bedrock-server-1.26.45.1.zip" o similar.
+  // 2. Fallback: leer el log de PM2 y buscar la línea "Version: X.Y.Z.W"
+  //    BDS imprime esto en stdout al arrancar.
+  try {
+    const logPaths = getPm2LogPaths();
+    if (logPaths && logPaths.out && fs.existsSync(logPaths.out)) {
+      // Buscar en las últimas 500 líneas del log de salida
+      const tail = execSync(`tail -n 500 "${logPaths.out}"`, { encoding: 'utf8', maxBuffer: 5 * 1024 * 1024 });
+      const match = tail.match(/Version[:\s]+(\d+\.\d+\.\d+(?:\.\d+)?)/);
+      if (match) return match[1];
+    }
+  } catch (e) {}
+
+  // 3. Fallback: buscar el zip original en la carpeta
   try {
     const files = fs.readdirSync(BEDROCK_DIR);
     const versionedFile = files.find(f => f.startsWith('bedrock-server-') && f.endsWith('.zip'));
@@ -531,14 +538,22 @@ function getCurrentBedrockVersion() {
     }
   } catch (e) {}
 
-  // 3. Último recurso: intentar obtenerla del ejecutable (puede no funcionar en todos los casos)
+  // 4. Último recurso (mucho más específico): buscar en el binario la cadena
+  //    que BDS usa internamente. Es "1.21.51.02" o similar, siempre con 3 o 4
+  //    componentes numéricos separados por puntos, precedido por "BDS" o "Version".
   try {
-    const out = execSync(`strings "${path.join(BEDROCK_DIR, 'bedrock_server')}" | grep -m1 "v[0-9]"`, { encoding: 'utf8' });
-    const match = out.match(/v([\d.]+)/);
-    return match ? match[1] : null;
-  } catch (e) {
-    return null; // No se pudo determinar la versión
-  }
+    const bin = path.join(BEDROCK_DIR, 'bedrock_server');
+    if (fs.existsSync(bin)) {
+      const out = execSync(
+        `strings "${bin}" | grep -oE "(BDS v|Version[ :]+)[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?" | head -1`,
+        { encoding: 'utf8', maxBuffer: 5 * 1024 * 1024 }
+      );
+      const match = out.match(/([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)/);
+      if (match) return match[1];
+    }
+  } catch (e) {}
+
+  return null;
 }
 
 // ---------- routes: status & server control ----------
