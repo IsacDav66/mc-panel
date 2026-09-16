@@ -645,7 +645,7 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-app.post('/api/server/:action', (req, res) => {
+app.post('/api/server/:action(start|stop|restart)', (req, res) => {
   withLock(res, async () => {
     pm2Action(req.params.action);
     if (req.params.action === 'restart' || req.params.action === 'start') {
