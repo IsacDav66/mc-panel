@@ -187,11 +187,12 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function zipDirToFile(sourceDir, destZipPath, onProgress) {
+async function zipDirToFile(sourceDir, destZipPath, onProgress, ignore = []) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(destZipPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
     output.on('close', resolve);
+    output.on('error', reject);
     archive.on('error', reject);
 
     if (typeof onProgress === 'function') {
@@ -212,7 +213,14 @@ async function zipDirToFile(sourceDir, destZipPath, onProgress) {
     }
 
     archive.pipe(output);
-    archive.directory(sourceDir, false);
+
+    // Si hay patrones a ignorar, usar glob(); si no, directory() como antes
+    if (Array.isArray(ignore) && ignore.length > 0) {
+      archive.glob('**/*', { cwd: sourceDir, dot: true, ignore });
+    } else {
+      archive.directory(sourceDir, false);
+    }
+
     archive.finalize();
   });
 }
@@ -796,7 +804,7 @@ app.post('/api/server/update', (req, res) => {
             percent: pct,
           };
         }
-      });
+      }, ['panel-backups/**', 'panel-data/**']);
       job.meta.backup = null;
 
       job.meta.step = 4;
