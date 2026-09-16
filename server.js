@@ -985,7 +985,12 @@ app.get('/api/backups', (req, res) => {
     .filter((f) => f.endsWith('.zip'))
     .map((f) => {
       const stat = fs.statSync(path.join(BACKUPS_DIR, f));
-      return { name: f, sizeBytes: stat.size, createdAt: stat.mtime };
+      return {
+        name: f,
+        sizeBytes: stat.size,
+        createdAt: stat.mtime,
+        auto: f.startsWith('auto-backup-'),
+      };
     })
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   res.json(files);
@@ -1356,7 +1361,15 @@ app.get('/api/addons/icon', (req, res) => {
   for (const iconPath of candidates) {
     if (fs.existsSync(iconPath)) return res.sendFile(iconPath);
   }
-  res.status(404).end();
+
+  // Fallback: SVG con "?" para packs sin icono
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+    <rect width="64" height="64" rx="8" fill="#0d1219" stroke="#2a3546" stroke-width="2"/>
+    <text x="32" y="42" font-family="sans-serif" font-size="28" font-weight="700" text-anchor="middle" fill="#4a5568">?</text>
+  </svg>`;
+  res.set('Content-Type', 'image/svg+xml');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.send(svg);
 });
 
 // ---------- routes: console ----------
@@ -1473,16 +1486,6 @@ app.get('/api/public/info', (req, res) => {
     const onlinePlayers = getOnlinePlayers();
     const isOnline = !!(proc && proc.pm2_env && proc.pm2_env.status === 'online');
 
-    const cleanText = (s) => {
-      if (!s) return '';
-      return String(s)
-        .replace(/§./g, '')        // códigos de color §x
-        .replace(/[\t\r\n]+/g, ' ') // tabs y saltos → espacio
-        .replace(/\s+/g, ' ')       // múltiples espacios → uno
-        .replace(/\s*#+\s*$/g, '')  // ### del final
-        .trim();
-    };
-
     // Leer packs de AMBAS ubicaciones: globales y dentro del mundo
     const worldPath = getCurrentWorldPath();
     const globalResourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR);
@@ -1564,7 +1567,98 @@ app.get('/api/public/pack-icon', (req, res) => {
   for (const iconPath of candidates) {
     if (fs.existsSync(iconPath)) return res.sendFile(iconPath);
   }
-  res.status(404).end();
+
+  // Fallback: SVG con "?" para packs sin icono
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+    <rect width="64" height="64" rx="8" fill="#0d1219" stroke="#2a3546" stroke-width="2"/>
+    <text x="32" y="42" font-family="sans-serif" font-size="28" font-weight="700" text-anchor="middle" fill="#4a5568">?</text>
+  </svg>`;
+  res.set('Content-Type', 'image/svg+xml');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.send(svg);
+});
+
+// ---------- backups automáticos programados ----------
+
+const AUTO_BACKUP_PREFIX = 'auto-backup-';
+const AUTO_BACKUP_KEEP = 2;
+
+async function runAutoBackup() {
+  if (busy) {
+    console.log('[auto-backup] Panel ocupado, saltando backup programado.');
+    return;
+  }
+
+  busy = true;
+  try {
+    const worldPath = getCurrentWorldPath();
+    if (!fs.existsSync(worldPath)) {
+      console.log('[auto-backup] No se encontró el mundo actual, saltando.');
+      return;
+    }
+
+    const stamp = timestamp();
+    const destName = `${AUTO_BACKUP_PREFIX}${stamp}.zip`;
+    const destPath = path.join(BACKUPS_DIR, destName);
+
+    console.log(`[auto-backup] Creando backup: ${destName}`);
+    await zipDirToFile(worldPath, destPath);
+    const stats = fs.statSync(destPath);
+    console.log(`[auto-backup] Backup creado: ${destName} (${(stats.size / 1024 / 1024).toFixed(1)} MB)`);
+
+    // Limpiar backups automáticos antiguos, manteniendo los N más recientes
+    const autoBackups = fs
+      .readdirSync(BACKUPS_DIR)
+      .filter((f) => f.startsWith(AUTO_BACKUP_PREFIX) && f.endsWith('.zip'))
+      .map((f) => {
+        const p = path.join(BACKUPS_DIR, f);
+        return { name: f, path: p, mtime: fs.statSync(p).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+
+    const toDelete = autoBackups.slice(AUTO_BACKUP_KEEP);
+    for (const f of toDelete) {
+      fs.unlinkSync(f.path);
+      console.log(`[auto-backup] Eliminado backup antiguo: ${f.name}`);
+    }
+
+    console.log(`[auto-backup] Completado. Conservados ${Math.min(autoBackups.length, AUTO_BACKUP_KEEP)} backups automáticos.`);
+  } catch (e) {
+    console.error('[auto-backup] Error:', e);
+  } finally {
+    busy = false;
+  }
+}
+
+function scheduleAutoBackup() {
+  const now = new Date();
+  const next = new Date();
+  next.setHours(0, 0, 0, 0); // hoy a medianoche
+  if (next <= now) next.setDate(next.getDate() + 1); // ya pasó, programar mañana
+
+  const msUntilMidnight = next - now;
+  const mins = Math.round(msUntilMidnight / 1000 / 60);
+  console.log(`[auto-backup] Próximo backup programado en ${mins} min (${next.toLocaleString()})`);
+
+  setTimeout(async () => {
+    await runAutoBackup();
+    scheduleAutoBackup(); // reprogramar para la siguiente medianoche
+  }, msUntilMidnight);
+}
+
+scheduleAutoBackup();
+
+// Endpoint para probar el backup automático ahora mismo
+app.post('/api/backups/run-auto-now', async (req, res) => {
+  if (busy) {
+    return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
+  }
+  try {
+    await runAutoBackup();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(PORT, () => {
