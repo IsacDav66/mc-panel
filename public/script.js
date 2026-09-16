@@ -29,10 +29,7 @@ function formatBytes(bytes) {
   const units = ['B', 'KB', 'MB', 'GB'];
   let i = 0;
   let n = bytes;
-  while (n >= 1024 && i < units.length - 1) {
-    n /= 1024;
-    i++;
-  }
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
   return `${n.toFixed(1)} ${units[i]}`;
 }
 
@@ -51,6 +48,11 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// Helper para iconos SVG (referencian el sprite en index.html)
+function svgIcon(id, cls = 'icon') {
+  return `<svg class="${cls}"><use href="#${id}"/></svg>`;
 }
 
 // ============================================================
@@ -83,7 +85,7 @@ async function refreshStatus() {
     if (onlineContainer) {
       if (data.onlinePlayers && data.onlinePlayers.length > 0) {
         onlineContainer.innerHTML = data.onlinePlayers
-          .map((p) => `<div class="list-item"><div>🟢 ${escapeHtml(p.name)}</div></div>`)
+          .map((p) => `<div class="list-item"><div><span class="online-dot"></span>${escapeHtml(p.name)}</div></div>`)
           .join('');
       } else {
         onlineContainer.innerHTML = '<p class="muted">Nadie está jugando ahora mismo.</p>';
@@ -180,9 +182,7 @@ async function loadServerProperties() {
     const seed = $('cwSeed'); if (seed) seed.value = p.seed || '';
     const cheats = $('cwCheats'); if (cheats) cheats.value = p.allowCheats ? 'true' : 'false';
     const perm = $('cwPermission'); if (perm) perm.value = p.playerPermission || 'member';
-  } catch (e) {
-    /* silencioso */
-  }
+  } catch (e) { /* silencioso */ }
 }
 
 on('formCreateWorld', 'submit', async (e) => {
@@ -271,7 +271,7 @@ function applyUpdateCheckResult(data) {
 
   if (data.updateAvailable) {
     if (bannerText) {
-      bannerText.innerHTML = `🎉 Nueva actualización detectada: <strong>${escapeHtml(data.latest)}</strong> (actual: ${escapeHtml(data.current || 'desconocida')})`;
+      bannerText.innerHTML = `Nueva actualización detectada: <strong>${escapeHtml(data.latest)}</strong> (actual: ${escapeHtml(data.current || 'desconocida')})`;
     }
     if (banner) banner.style.display = 'flex';
     if (msg) {
@@ -385,9 +385,13 @@ async function loadBackups() {
           ${escapeHtml(b.name)} ${b.auto ? '<span class="tag tag-auto">Auto</span>' : ''}
           <div class="meta">${formatBytes(b.sizeBytes)} · ${new Date(b.createdAt).toLocaleString()}</div>
         </div>
-        <div>
-          <a href="api/backups/${encodeURIComponent(b.name)}" class="btn btn-blue" style="padding:6px 10px;font-size:12px;">Descargar</a>
-          <button class="icon-btn" data-file="${escapeHtml(b.name)}">Eliminar</button>
+        <div class="list-item-actions">
+          <a href="api/backups/${encodeURIComponent(b.name)}" class="btn btn-blue btn-sm">
+            ${svgIcon('i-download')}<span>Descargar</span>
+          </a>
+          <button class="icon-btn" data-file="${escapeHtml(b.name)}">
+            ${svgIcon('i-trash')}<span>Eliminar</span>
+          </button>
         </div>
       </div>`
       )
@@ -441,19 +445,25 @@ function renderAddonLists() {
         const orderDisabled = !p.uuid || !p.appliedToWorld;
         return `
       <div class="pack-item">
-        <img class="pack-icon" src="${iconUrl(p, type)}" alt="" />
+        <img class="pack-icon" src="${iconUrl(p, type)}" alt="" onerror="this.style.visibility='hidden'" />
         <div class="pack-info">
           <div>${escapeHtml(p.name)} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''} ${brokenTag} ${scriptTag}</div>
           <div class="meta">v${escapeHtml(versionText)} · ${escapeHtml(p.description || '')}</div>
         </div>
         <div class="pack-actions">
-          <button class="order-btn" data-action="up" data-type="${type}" data-uuid="${escapeHtml(p.uuid || '')}" ${orderDisabled || p.isFirst ? 'disabled' : ''}>▲</button>
-          <button class="order-btn" data-action="down" data-type="${type}" data-uuid="${escapeHtml(p.uuid || '')}" ${orderDisabled || p.isLast ? 'disabled' : ''}>▼</button>
+          <button class="order-btn" data-action="up" data-type="${type}" data-uuid="${escapeHtml(p.uuid || '')}" ${orderDisabled || p.isFirst ? 'disabled' : ''} title="Subir prioridad">
+            ${svgIcon('i-chevron-up')}
+          </button>
+          <button class="order-btn" data-action="down" data-type="${type}" data-uuid="${escapeHtml(p.uuid || '')}" ${orderDisabled || p.isLast ? 'disabled' : ''} title="Bajar prioridad">
+            ${svgIcon('i-chevron-down')}
+          </button>
           <label class="switch" title="Activar/desactivar para el mundo actual">
             <input type="checkbox" data-toggle="${type}" data-folder="${escapeHtml(p.folder)}" data-location="${escapeHtml(p.location)}" ${p.appliedToWorld ? 'checked' : ''} ${p.broken ? 'disabled' : ''} />
             <span class="slider"></span>
           </label>
-          <button class="icon-btn" data-type="${type}" data-folder="${escapeHtml(p.folder)}" data-location="${escapeHtml(p.location)}">Eliminar</button>
+          <button class="icon-btn" data-type="${type}" data-folder="${escapeHtml(p.folder)}" data-location="${escapeHtml(p.location)}" title="Eliminar">
+            ${svgIcon('i-trash')}
+          </button>
         </div>
       </div>`;
       })
@@ -540,11 +550,11 @@ on('formAddonUpload', 'submit', async (e) => {
 
     const parts = [];
     if (result.installed?.length) {
-      parts.push(`✅ Instalados: ${result.installed.map((p) => escapeHtml(p.name)).join(', ')}.`);
+      parts.push(`Instalados: ${result.installed.map((p) => escapeHtml(p.name)).join(', ')}.`);
     }
     if (result.skipped?.length) {
       parts.push(
-        `⚠️ Omitidos: ${result.skipped
+        `Omitidos: ${result.skipped
           .map((s) => `${escapeHtml(s.dir)} (${escapeHtml(s.reason)})`)
           .join(' | ')}`
       );
@@ -624,9 +634,7 @@ function closeSkinModal() {
   const modal = $('skinModal');
   if (modal) modal.style.display = 'none';
   if (currentSkinViewer) {
-    try {
-      currentSkinViewer.dispose();
-    } catch (e) {}
+    try { currentSkinViewer.dispose(); } catch (e) {}
     currentSkinViewer = null;
   }
 }
@@ -644,9 +652,7 @@ async function openSkinModal(player) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   if (currentSkinViewer) {
-    try {
-      currentSkinViewer.dispose();
-    } catch (e) {}
+    try { currentSkinViewer.dispose(); } catch (e) {}
     currentSkinViewer = null;
   }
 
@@ -725,13 +731,13 @@ async function loadPlayers() {
           <div class="player-cell-name">
             <img class="player-skin" src="${skinUrl}"
                  onerror="this.onerror=null;this.src='${fallback}'"
-                 data-name="${safeName}" title="Ver skin 3D" />
+                 data-name="${safeName}" title="Ver skin 3D" alt="" />
             <span>${safeName}</span>
           </div>
-          <div class="meta">${p.firstSeen ? new Date(p.firstSeen).toLocaleDateString() : '—'}</div>
-          <div class="meta">${p.lastSeen ? new Date(p.lastSeen).toLocaleString() : '—'}</div>
-          <div>${statusBadges || '—'}</div>
-          <div>
+          <div data-label="Primera vez" class="meta">${p.firstSeen ? new Date(p.firstSeen).toLocaleDateString() : '—'}</div>
+          <div data-label="Última vez" class="meta">${p.lastSeen ? new Date(p.lastSeen).toLocaleString() : '—'}</div>
+          <div data-label="Estado">${statusBadges || '—'}</div>
+          <div data-label="Modo">
             <select class="gamemode-select" data-name="${safeName}">
               <option value="">Modo…</option>
               <option value="survival">Survival</option>
@@ -831,7 +837,6 @@ loadAddons();
 refreshConsole();
 loadPlayers();
 
-// Chequeo de actualizaciones: al abrir + cada 30 min
 checkForUpdates(false);
 autoUpdateCheckInterval = setInterval(() => checkForUpdates(false), 30 * 60 * 1000);
 

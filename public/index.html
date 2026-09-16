@@ -9,21 +9,112 @@
 </head>
 
 <body>
+
+  <!-- ============================================================ -->
+  <!-- SVG Sprite — iconos reutilizables en todo el panel           -->
+  <!-- ============================================================ -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-pickaxe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="M14 12 5.5 20.5a2.12 2.12 0 1 1-3-3L11 9" />
+      <path d="M15 13 9 7l4-4 6 6h3a8 8 0 0 1-7 7z" />
+    </symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+      <line x1="12" x2="12" y1="9" y2="13" />
+      <line x1="12" x2="12.01" y1="17" y2="17" />
+    </symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <path
+        d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
+    </symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor">
+      <polygon points="6 3 20 12 6 21 6 3" />
+    </symbol>
+    <symbol id="i-square" viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="1" />
+    </symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+      <path d="M21 3v5h-5" />
+      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+      <path d="M8 16H3v5" />
+    </symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+      stroke-linecap="round" stroke-linejoin="round">
+      <path d="m18 15-6-6-6 6" />
+    </symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+      stroke-linecap="round" stroke-linejoin="round">
+      <path d="m6 9 6 6 6-6" />
+    </symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" x2="12" y1="15" y2="3" />
+    </symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" x2="12" y1="3" y2="15" />
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="M20 6 9 17l-5-5" />
+    </symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round">
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </symbol>
+  </svg>
+
   <div class="app">
-    <div id="restartBanner" class="restart-banner" style="display:none;">
-      ⚠️ Hay cambios en addons/texturas sin aplicar.
-      <button id="btnRestartFromBanner" class="btn btn-orange" style="padding:4px 12px;font-size:12px;">Reiniciar
-        ahora</button>
+    <div id="restartBanner" class="banner banner-warning" style="display:none;">
+      <span class="banner-content">
+        <svg class="icon">
+          <use href="#i-warning" />
+        </svg>
+        <span>Hay cambios en addons/texturas sin aplicar.</span>
+      </span>
+      <button id="btnRestartFromBanner" class="btn btn-orange btn-sm">Reiniciar ahora</button>
     </div>
 
-    <div id="updateBanner" class="update-banner" style="display:none;">
-      <span id="updateBannerText">🎉 Nueva actualización disponible</span>
-      <button id="btnUpdateFromBanner" class="btn btn-green" style="padding:4px 12px;font-size:12px;">Actualizar
-        ahora</button>
+    <div id="updateBanner" class="banner banner-info" style="display:none;">
+      <span class="banner-content">
+        <svg class="icon">
+          <use href="#i-sparkles" />
+        </svg>
+        <span id="updateBannerText">Nueva actualización disponible</span>
+      </span>
+      <button id="btnUpdateFromBanner" class="btn btn-green btn-sm">Actualizar ahora</button>
     </div>
 
     <header class="topbar">
-      <h1>⛏️ Panel del Servidor Bedrock</h1>
+      <h1>
+        <svg class="icon icon-lg">
+          <use href="#i-pickaxe" />
+        </svg>
+        <span>Panel del Servidor Bedrock</span>
+      </h1>
       <div id="statusPill" class="pill pill-unknown">Cargando…</div>
     </header>
 
@@ -33,18 +124,38 @@
         <h2>Servidor</h2>
         <div id="statusDetails" class="status-details">—</div>
         <div class="button-row">
-          <button id="btnStart" class="btn btn-green">Iniciar</button>
-          <button id="btnRestart" class="btn btn-blue">Reiniciar</button>
-          <button id="btnStop" class="btn btn-red">Detener</button>
+          <button id="btnStart" class="btn btn-green">
+            <svg class="icon">
+              <use href="#i-play" />
+            </svg><span>Iniciar</span>
+          </button>
+          <button id="btnRestart" class="btn btn-blue">
+            <svg class="icon">
+              <use href="#i-rotate" />
+            </svg><span>Reiniciar</span>
+          </button>
+          <button id="btnStop" class="btn btn-red">
+            <svg class="icon">
+              <use href="#i-square" />
+            </svg><span>Detener</span>
+          </button>
         </div>
+
         <hr />
+
         <h3>Actualizaciones</h3>
-        <p class="muted" style="margin-top:0;">
-          El panel comprueba automáticamente si hay nuevas versiones al abrirse y cada 30 minutos.
-        </p>
+        <p class="muted">El panel comprueba automáticamente si hay nuevas versiones al abrirse y cada 30 minutos.</p>
         <div class="button-row">
-          <button id="btnCheckUpdates" class="btn btn-blue">Comprobar ahora</button>
-          <button id="btnUpdateServer" class="btn btn-orange" disabled>Actualizar servidor</button>
+          <button id="btnCheckUpdates" class="btn btn-blue">
+            <svg class="icon">
+              <use href="#i-refresh" />
+            </svg><span>Comprobar ahora</span>
+          </button>
+          <button id="btnUpdateServer" class="btn btn-orange" disabled>
+            <svg class="icon">
+              <use href="#i-sparkles" />
+            </svg><span>Actualizar servidor</span>
+          </button>
         </div>
         <div id="updateMsg" class="msg"></div>
       </section>
@@ -62,14 +173,23 @@
         <div class="two-col">
           <div>
             <h3>Descargar copia</h3>
-            <button id="btnDownloadWorld" class="btn btn-blue">Descargar .mcworld</button>
+            <button id="btnDownloadWorld" class="btn btn-blue">
+              <svg class="icon">
+                <use href="#i-download" />
+              </svg><span>Descargar .mcworld</span>
+            </button>
           </div>
           <div>
             <h3>Subir mundo existente</h3>
-            <p class="muted">Detiene el servidor, hace backup del mundo actual y lo reemplaza por el archivo subido (.mcworld o .zip).</p>
+            <p class="muted">Detiene el servidor, hace backup del mundo actual y lo reemplaza por el archivo subido
+              (.mcworld o .zip).</p>
             <form id="formWorldUpload" class="upload-form">
               <input type="file" id="worldFile" accept=".mcworld,.zip" required />
-              <button type="submit" class="btn btn-orange">Reemplazar</button>
+              <button type="submit" class="btn btn-orange">
+                <svg class="icon">
+                  <use href="#i-upload" />
+                </svg><span>Reemplazar</span>
+              </button>
             </form>
             <div id="worldUploadMsg" class="msg"></div>
           </div>
@@ -78,10 +198,8 @@
         <hr />
 
         <h3>Crear mundo nuevo desde cero</h3>
-        <p class="muted">
-          Genera un mundo nuevo en blanco con los ajustes que elijas. El mundo actual se respalda
-          automáticamente antes de reemplazarlo.
-        </p>
+        <p class="muted">Genera un mundo nuevo en blanco con los ajustes que elijas. El mundo actual se respalda
+          automáticamente antes de reemplazarlo.</p>
         <form id="formCreateWorld" class="create-world-form">
           <div>
             <label for="cwName">Nombre del mundo</label>
@@ -124,7 +242,11 @@
             </select>
           </div>
           <div class="form-full">
-            <button type="submit" class="btn btn-green">Crear y reemplazar mundo</button>
+            <button type="submit" class="btn btn-green">
+              <svg class="icon">
+                <use href="#i-check" />
+              </svg><span>Crear y reemplazar mundo</span>
+            </button>
             <div id="createWorldMsg" class="msg"></div>
           </div>
         </form>
@@ -137,10 +259,15 @@
 
       <section class="card card-wide">
         <h2>Addons y Texture Packs</h2>
-        <p class="muted">Sube un archivo .mcpack o .mcaddon para instalarlo. Se aplica automáticamente al mundo actual.</p>
+        <p class="muted">Sube un archivo .mcpack o .mcaddon para instalarlo. Se aplica automáticamente al mundo actual.
+        </p>
         <form id="formAddonUpload" class="upload-form">
           <input type="file" id="addonFile" accept=".mcpack,.mcaddon,.zip" required />
-          <button type="submit" class="btn btn-orange">Instalar addon</button>
+          <button type="submit" class="btn btn-orange">
+            <svg class="icon">
+              <use href="#i-upload" />
+            </svg><span>Instalar addon</span>
+          </button>
         </form>
         <div id="addonUploadMsg" class="msg"></div>
 
@@ -165,8 +292,12 @@
         <pre id="consoleOutput" class="console-output">Cargando…</pre>
         <form id="formConsoleSend" class="upload-form">
           <input type="text" id="consoleInput" placeholder="Escribe un comando…" autocomplete="off"
-            style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--panel-border);background:#0d1219;color:var(--text);" />
-          <button type="submit" class="btn btn-blue">Enviar</button>
+            class="input-text" />
+          <button type="submit" class="btn btn-blue">
+            <svg class="icon">
+              <use href="#i-play" />
+            </svg><span>Enviar</span>
+          </button>
         </form>
       </section>
 
@@ -183,7 +314,11 @@
     <div class="modal">
       <div class="modal-header">
         <h3 id="skinModalName">Jugador</h3>
-        <button id="skinModalClose" class="modal-close" aria-label="Cerrar">✕</button>
+        <button id="skinModalClose" class="modal-close" aria-label="Cerrar">
+          <svg class="icon">
+            <use href="#i-x" />
+          </svg>
+        </button>
       </div>
       <div class="modal-body">
         <canvas id="skinCanvas" width="200" height="320"></canvas>
