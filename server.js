@@ -877,23 +877,38 @@ app.post('/api/server/update', (req, res) => {
       ];
       const preserveTmp = path.join(updateTmpDir, 'preserve');
       await fsp.mkdir(preserveTmp, { recursive: true });
+
+      // 1. Mover todo lo que queremos preservar a la carpeta temporal
       for (const item of preserve) {
         const src = path.join(BEDROCK_DIR, item);
         if (fs.existsSync(src)) {
           await fsp.rename(src, path.join(preserveTmp, item));
         }
       }
+
+      // 2. Borrar el resto de archivos del servidor (excepto panel-backups y panel-data)
       const entries = await fsp.readdir(BEDROCK_DIR);
       for (const entry of entries) {
         if (entry === 'panel-backups' || entry === 'panel-data') continue;
         await rmrf(path.join(BEDROCK_DIR, entry));
       }
+
+      // 3. Copiar los archivos nuevos del ZIP a BEDROCK_DIR
       await fsp.cp(extractDir, BEDROCK_DIR, { recursive: true });
+
+      // 4. Restaurar lo preservado: borrar el destino primero si existe
+      //    (el ZIP trae sus propias carpetas resource_packs/, behavior_packs/,
+      //    worlds/ con packs vanilla, hay que quitarlas antes del rename)
       for (const item of preserve) {
         const src = path.join(preserveTmp, item);
-        if (fs.existsSync(src)) {
-          await fsp.rename(src, path.join(BEDROCK_DIR, item));
+        if (!fs.existsSync(src)) continue;
+
+        const dest = path.join(BEDROCK_DIR, item);
+        // Si el destino ya existe (porque el ZIP lo trae), borrarlo primero
+        if (fs.existsSync(dest)) {
+          await rmrf(dest);
         }
+        await fsp.rename(src, dest);
       }
       await rmrf(updateTmpDir);
 
