@@ -442,7 +442,7 @@ function renderAddonLists() {
         const orderDisabled = !p.uuid || !p.appliedToWorld;
         return `
       <div class="pack-item">
-        <img class="pack-icon" src="${iconUrl(p)}" onerror="this.style.visibility='hidden'" alt="" />
+        <img class="pack-icon" src="${iconUrl(p)}" onerror="this.onerror=null;this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 fill=%22%230d1219%22/><text x=%2216%22 y=%2221%22 font-size=%2216%22 text-anchor=%22middle%22 fill=%22%23555%22>?</text></svg>'" alt="" />
         <div class="pack-info">
           <div>${escapeHtml(p.name)} ${p.builtIn ? '<span class="tag tag-system">Sistema</span>' : ''} ${p.location === 'world' ? '<span class="tag tag-world">En el mundo</span>' : ''} ${brokenTag} ${scriptTag}</div>
           <div class="meta">v${escapeHtml(versionText)} · ${escapeHtml(p.description || '')}</div>

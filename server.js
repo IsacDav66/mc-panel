@@ -191,6 +191,16 @@ async function rmrf(p) {
   await fsp.rm(p, { recursive: true, force: true });
 }
 
+function cleanText(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/§./g, '')         // códigos de color §x
+    .replace(/[\t\r\n]+/g, ' ')  // tabs y saltos → espacio
+    .replace(/\s+/g, ' ')        // múltiples espacios → uno
+    .replace(/\s*#+\s*$/g, '')   // ### del final
+    .trim();
+}
+
 function timestamp() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -295,8 +305,8 @@ function readManifest(dir) {
     const langMap = loadLangMap(dir);
     const rawName = (data.header && data.header.name) || path.basename(dir);
     const rawDescription = (data.header && data.header.description) || '';
-    const name = resolveText(rawName, langMap);
-    const description = resolveText(rawDescription, langMap);
+    const name = cleanText(resolveText(rawName, langMap));
+    const description = cleanText(resolveText(rawDescription, langMap));
 
     const modules = data.modules || [];
     let type = 'resources';
@@ -1331,15 +1341,22 @@ app.get('/api/addons/icon', (req, res) => {
   const { type, location, folder } = req.query;
   if (!['resources', 'behavior'].includes(type)) return res.status(400).end();
   const safeFolder = path.basename(folder || '');
-  const baseDir =
-    location === 'world'
-      ? path.join(getCurrentWorldPath(), type === 'behavior' ? 'behavior_packs' : 'resource_packs')
-      : type === 'behavior'
-      ? BEHAVIOR_PACKS_DIR
-      : RESOURCE_PACKS_DIR;
-  const iconPath = path.join(baseDir, safeFolder, 'pack_icon.png');
-  if (!fs.existsSync(iconPath)) return res.status(404).end();
-  res.sendFile(iconPath);
+
+  const baseGlobal = type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
+  const baseWorld = path.join(
+    getCurrentWorldPath(),
+    type === 'behavior' ? 'behavior_packs' : 'resource_packs'
+  );
+
+  // Buscar primero en la ubicación declarada, luego en la otra como fallback
+  const candidates = location === 'world'
+    ? [path.join(baseWorld, safeFolder, 'pack_icon.png'), path.join(baseGlobal, safeFolder, 'pack_icon.png')]
+    : [path.join(baseGlobal, safeFolder, 'pack_icon.png'), path.join(baseWorld, safeFolder, 'pack_icon.png')];
+
+  for (const iconPath of candidates) {
+    if (fs.existsSync(iconPath)) return res.sendFile(iconPath);
+  }
+  res.status(404).end();
 });
 
 // ---------- routes: console ----------
