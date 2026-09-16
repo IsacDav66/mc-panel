@@ -826,8 +826,13 @@ app.post('/api/server/update', (req, res) => {
       const totalDownload = parseInt(downloadRes.headers.get('content-length') || '0', 10);
       let downloadedBytes = 0;
       let lastUpd = 0;
+
+      // Node 18+ fetch devuelve un Web ReadableStream — lo convertimos a Node Stream
+      const { Readable } = require('stream');
+      const nodeStream = Readable.fromWeb(downloadRes.body);
+
       await new Promise((resolve, reject) => {
-        downloadRes.body.on('data', (chunk) => {
+        nodeStream.on('data', (chunk) => {
           downloadedBytes += chunk.length;
           const now = Date.now();
           if (now - lastUpd > 500 && totalDownload > 0) {
@@ -842,9 +847,10 @@ app.post('/api/server/update', (req, res) => {
             };
           }
         });
-        downloadRes.body.pipe(fileStream);
-        downloadRes.body.on('error', reject);
+        nodeStream.on('error', reject);
+        fileStream.on('error', reject);
         fileStream.on('finish', resolve);
+        nodeStream.pipe(fileStream);
       });
       job.meta.download = null;
 
