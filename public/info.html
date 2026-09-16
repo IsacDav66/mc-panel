@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Servidor Bedrock — Información</title>
+    <link rel="stylesheet" href="info.css" />
+</head>
+
+<body>
+    <div class="app">
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-icon">⛏️</span>
+                <div>
+                    <h1 id="serverName">Servidor Bedrock</h1>
+                    <p class="brand-sub" id="levelName">—</p>
+                </div>
+            </div>
+            <div id="statusPill" class="pill pill-unknown">Cargando…</div>
+        </header>
+
+        <main class="grid">
+
+            <section class="card card-wide hero">
+                <h2>Conéctate</h2>
+                <p class="muted" style="margin-top:0;">Añade este servidor en Minecraft Bedrock</p>
+                <div class="connect-row">
+                    <div class="connect-field">
+                        <label>Dirección</label>
+                        <div class="connect-value">
+                            <code id="serverAddress">—</code>
+                            <button class="copy-btn" data-copy="serverAddress" title="Copiar dirección">📋</button>
+                        </div>
+                    </div>
+                    <div class="connect-field">
+                        <label>Puerto</label>
+                        <div class="connect-value">
+                            <code id="serverPort">—</code>
+                            <button class="copy-btn" data-copy="serverPort" title="Copiar puerto">📋</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Estado del servidor</h2>
+                <div id="statusDetails" class="status-details">Cargando…</div>
+                <div id="uptimeBlock" style="margin-top:14px; display:none;">
+                    <div class="muted" style="font-size:11px; text-transform:uppercase; letter-spacing:0.05em;">Tiempo
+                        activo</div>
+                    <div id="uptimeValue" class="uptime-value">—</div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Jugadores en línea <span id="playersCountBadge" class="badge">0</span></h2>
+                <div id="onlinePlayersList" class="list">Cargando…</div>
+            </section>
+
+            <section class="card card-wide">
+                <h2>Contenido instalado</h2>
+                <div class="two-col">
+                    <div>
+                        <h3>Resource Packs <span id="resPacksCountBadge" class="badge">0</span></h3>
+                        <div id="resourcePacksList" class="list">Cargando…</div>
+                    </div>
+                    <div>
+                        <h3>Addons / Behavior Packs <span id="behPacksCountBadge" class="badge">0</span></h3>
+                        <div id="behaviorPacksList" class="list">Cargando…</div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <footer class="footer">
+            <span class="muted">Actualizado automáticamente cada 10 segundos</span>
+        </footer>
+    </div>
+
+    <script src="info.js"></script>
+</body>
+
+</html>

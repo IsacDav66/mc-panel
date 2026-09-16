@@ -1,0 +1,328 @@
+:root {
+  --bg: #10151c;
+  --panel: #1a2230;
+  --panel-border: #2a3546;
+  --text: #e6ecf5;
+  --muted: #8b98ac;
+  --green: #3ecf8e;
+  --red: #f0576b;
+  --blue: #4f8cff;
+  --orange: #ffa94d;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-icon {
+  font-size: 28px;
+}
+
+.topbar h1 {
+  font-size: 20px;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.brand-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pill {
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pill-online { background: rgba(62,207,142,0.15); color: var(--green); }
+.pill-stopped { background: rgba(240,87,107,0.15); color: var(--red); }
+.pill-unknown { background: rgba(139,152,172,0.15); color: var(--muted); }
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.card-wide { grid-column: 1 / -1; }
+
+.card h2 {
+  margin-top: 0;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card h3 {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.muted { color: var(--muted); font-size: 13px; }
+
+.badge {
+  display: inline-block;
+  min-width: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, #1a2230 0%, #1f2a3d 100%);
+}
+
+.connect-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.connect-field label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.connect-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0d1219;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.connect-value code {
+  flex: 1;
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.copy-btn:hover {
+  opacity: 1;
+  background: rgba(255,255,255,0.06);
+}
+
+.copy-btn.copied {
+  color: var(--green);
+  opacity: 1;
+}
+
+/* Status details */
+.status-details {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.status-details .row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.status-details .row:last-child {
+  border-bottom: none;
+}
+
+.status-details .row strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.uptime-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--green);
+  margin: 6px 0 0;
+}
+
+/* Listas */
+.list { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+
+.list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  gap: 10px;
+}
+
+.list-item .player-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-item .player-name::before {
+  content: '🟢';
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.pack-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.pack-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #0d1219;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+}
+
+.pack-info { flex: 1; min-width: 0; }
+
+.pack-info .pack-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pack-info .meta {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag {
+  display: inline-block;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(79,140,255,0.15);
+  color: var(--blue);
+  margin-left: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.tag-broken {
+  background: rgba(240,87,107,0.15);
+  color: var(--red);
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.footer {
+  text-align: center;
+  padding: 24px 0 8px;
+  font-size: 12px;
+}
+
+/* Responsive */
+@media (max-width: 720px) {
+  .app { padding: 16px; }
+  .grid { grid-template-columns: 1fr; }
+  .two-col { grid-template-columns: 1fr; }
+  .connect-row { grid-template-columns: 1fr; }
+  .topbar { flex-direction: column; align-items: flex-start; }
+  .brand { width: 100%; }
+  .topbar h1 { font-size: 18px; }
+  .card { padding: 16px; }
+  .pill { padding: 4px 10px; font-size: 12px; }
+}
+
+@media (max-width: 480px) {
+  .app { padding: 12px; }
+  .card { padding: 14px; border-radius: 8px; }
+  .card h2 { font-size: 15px; }
+  .connect-value code { font-size: 13px; }
+  .uptime-value { font-size: 18px; }
+}

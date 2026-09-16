@@ -82,13 +82,26 @@ const upload = multer({
 const app = express();
 app.use(express.json());
 
-app.use(
-  basicAuth({
-    users: { [process.env.PANEL_USER || 'admin']: process.env.PANEL_PASS || 'cambia-esta-clave' },
-    challenge: true,
-    realm: 'MC Bedrock Panel',
-  })
-);
+const requireAuth = basicAuth({
+  users: { [process.env.PANEL_USER || 'admin']: process.env.PANEL_PASS || 'cambia-esta-clave' },
+  challenge: true,
+  realm: 'MC Bedrock Panel',
+});
+
+// Rutas públicas — accesibles sin autenticación.
+// Todo lo demás (panel admin y /api/* que no sea /api/public/*) sigue protegido.
+const PUBLIC_PATHS = new Set([
+  '/info',
+  '/info.html',
+  '/info.js',
+  '/info.css',
+]);
+
+app.use((req, res, next) => {
+  if (PUBLIC_PATHS.has(req.path)) return next();
+  if (req.path.startsWith('/api/public/')) return next();
+  return requireAuth(req, res, next);
+});
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -1432,6 +1445,71 @@ app.post('/api/players/:name/gamemode', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// ---------- routes: public (sin auth) ----------
+
+app.get('/api/public/info', (req, res) => {
+  try {
+    const proc = findPm2Process();
+    const props = readProperties();
+    const onlinePlayers = getOnlinePlayers();
+    const isOnline = !!(proc && proc.pm2_env && proc.pm2_env.status === 'online');
+
+    const mapPack = (p) => ({
+      name: p.name,
+      version: p.version,
+      description: p.description || '',
+      folder: p.folder,
+      broken: !!p.broken,
+    });
+
+    const resourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR)
+      .filter((p) => !p.builtIn)
+      .map(mapPack);
+    const behaviorPacks = listInstalledPacks(BEHAVIOR_PACKS_DIR)
+      .filter((p) => !p.builtIn)
+      .map(mapPack);
+
+    const host = process.env.PUBLIC_SERVER_ADDRESS || req.hostname || 'localhost';
+    const port = (props['server-port'] || '19132').trim();
+
+    res.json({
+      online: isOnline,
+      serverName: (props['server-name'] || 'Bedrock Server').trim(),
+      levelName: (props['level-name'] || 'Bedrock level').trim(),
+      gamemode: (props['gamemode'] || 'survival').trim(),
+      difficulty: (props['difficulty'] || 'normal').trim(),
+      maxPlayers: parseInt(props['max-players'] || '10', 10) || 10,
+      address: host,
+      port,
+      uptimeMs: isOnline && proc.pm2_env.pm_uptime ? Date.now() - proc.pm2_env.pm_uptime : null,
+      playersOnline: onlinePlayers.map((p) => ({ name: p.name })),
+      playersOnlineCount: onlinePlayers.length,
+      lastActivity: getLastActivity(),
+      resourcePacks,
+      behaviorPacks,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/public/pack-icon', (req, res) => {
+  const { type, folder } = req.query;
+  if (!['resources', 'behavior'].includes(type)) return res.status(400).end();
+  const safeFolder = path.basename(folder || '');
+
+  const worldPath = getCurrentWorldPath();
+  const candidates = [
+    path.join(type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR, safeFolder, 'pack_icon.png'),
+    path.join(worldPath, type === 'behavior' ? 'behavior_packs' : 'resource_packs', safeFolder, 'pack_icon.png'),
+  ];
+
+  for (const iconPath of candidates) {
+    if (fs.existsSync(iconPath)) return res.sendFile(iconPath);
+  }
+  res.status(404).end();
 });
 
 app.listen(PORT, () => {

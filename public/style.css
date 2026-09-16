@@ -400,10 +400,63 @@ input[type="file"] { color: var(--muted); font-size: 13px; }
 /* ---------- Responsive ---------- */
 
 @media (max-width: 720px) {
+  .app { padding: 16px; }
   .grid { grid-template-columns: 1fr; }
   .two-col { grid-template-columns: 1fr; }
   .create-world-form { grid-template-columns: 1fr; }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .topbar h1 { font-size: 18px; }
+  .pill { padding: 4px 10px; font-size: 12px; }
+
+  .card { padding: 16px; }
+  .card h2 { font-size: 15px; }
+
+  .btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+  .button-row { gap: 6px; }
+
+  .upload-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .upload-form input[type="file"] { width: 100%; }
+  .upload-form button { width: 100%; }
+
+  .console-output { height: 180px; font-size: 11px; }
+
   .players-table-header { display: none; }
-  .player-row { grid-template-columns: 1fr; }
+  .player-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 12px;
+  }
   .player-row > div { padding: 2px 0; }
+
+  .modal { max-width: 100%; }
+}
+
+@media (max-width: 480px) {
+  .app { padding: 12px; }
+  .card { padding: 14px; border-radius: 8px; }
+  .card h2 { font-size: 14px; }
+  .card h3 { font-size: 13px; }
+  .pill { padding: 4px 8px; font-size: 11px; }
+
+  .player-actions { gap: 4px; }
+  .player-actions button {
+    font-size: 10px;
+    padding: 3px 6px;
+  }
+
+  .pack-icon { width: 30px; height: 30px; }
+  .pack-info .meta { font-size: 11px; }
+
+  .gamemode-select { font-size: 11px; padding: 3px 6px; }
 }
