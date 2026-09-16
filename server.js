@@ -195,6 +195,15 @@ async function zipDirToFile(sourceDir, destZipPath, onProgress, ignore = []) {
     output.on('error', reject);
     archive.on('error', reject);
 
+    // Ignorar entradas no soportadas (FIFOs, sockets, etc.) sin abortar
+    archive.on('warning', (err) => {
+      if (err.code === 'ENOENT') return;
+      // Silencioso: los ENTRYNOTSUPPORTED son de console.fifo u otros pipes
+      if (err.code !== 'ENTRYNOTSUPPORTED') {
+        console.warn('[zip] warning:', err.code, err.message);
+      }
+    });
+
     if (typeof onProgress === 'function') {
       let lastCall = 0;
       archive.on('progress', (data) => {
@@ -214,7 +223,6 @@ async function zipDirToFile(sourceDir, destZipPath, onProgress, ignore = []) {
 
     archive.pipe(output);
 
-    // Si hay patrones a ignorar, usar glob(); si no, directory() como antes
     if (Array.isArray(ignore) && ignore.length > 0) {
       archive.glob('**/*', { cwd: sourceDir, dot: true, ignore });
     } else {
@@ -804,7 +812,7 @@ app.post('/api/server/update', (req, res) => {
             percent: pct,
           };
         }
-      }, ['panel-backups/**', 'panel-data/**']);
+      }, ['panel-backups/**', 'panel-data/**', 'console.fifo', '**/*.fifo', '**/*.sock']);
       job.meta.backup = null;
 
       job.meta.step = 4;
