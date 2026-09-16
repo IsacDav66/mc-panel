@@ -115,7 +115,7 @@ function renderPacks(data) {
     if (list.length === 0) return '<p class="muted">Ninguno instalado.</p>';
     return list
       .map((p) => {
-        const icon = `api/public/pack-icon?type=${type}&folder=${encodeURIComponent(p.folder)}`;
+        const icon = `api/public/pack-icon?type=${type}&folder=${encodeURIComponent(p.folder)}&location=${encodeURIComponent(p.location || 'global')}`;
         const brokenTag = p.broken ? '<span class="tag tag-broken">Roto</span>' : '';
         const desc = p.description ? escapeHtml(p.description) : '';
         return `

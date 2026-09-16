@@ -1456,27 +1456,52 @@ app.get('/api/public/info', (req, res) => {
     const onlinePlayers = getOnlinePlayers();
     const isOnline = !!(proc && proc.pm2_env && proc.pm2_env.status === 'online');
 
-    const mapPack = (p) => ({
-      name: p.name,
-      version: p.version,
-      description: p.description || '',
-      folder: p.folder,
-      broken: !!p.broken,
-    });
+    const cleanText = (s) => {
+      if (!s) return '';
+      return String(s)
+        .replace(/§./g, '')        // códigos de color §x
+        .replace(/[\t\r\n]+/g, ' ') // tabs y saltos → espacio
+        .replace(/\s+/g, ' ')       // múltiples espacios → uno
+        .replace(/\s*#+\s*$/g, '')  // ### del final
+        .trim();
+    };
 
-        // Leer qué packs están realmente aplicados al mundo actual
+    // Leer packs de AMBAS ubicaciones: globales y dentro del mundo
+    const worldPath = getCurrentWorldPath();
+    const globalResourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR);
+    const globalBehaviorPacks = listInstalledPacks(BEHAVIOR_PACKS_DIR);
+    const worldResourcePacks = listInstalledPacks(path.join(worldPath, 'resource_packs'));
+    const worldBehaviorPacks = listInstalledPacks(path.join(worldPath, 'behavior_packs'));
+
+    // Leer qué packs están aplicados al mundo actual
     const appliedResources = readWorldPackList('world_resource_packs.json');
     const appliedBehaviors = readWorldPackList('world_behavior_packs.json');
     const appliedResourceUuids = new Set(appliedResources.map((p) => p.pack_id));
     const appliedBehaviorUuids = new Set(appliedBehaviors.map((p) => p.pack_id));
 
-    // Solo mostrar los que están aplicados (activos) en el mundo
-    const resourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR)
+    const mapPack = (p, location) => ({
+      name: cleanText(p.name),
+      version: p.version,
+      description: cleanText(p.description || ''),
+      folder: p.folder,
+      location,
+      broken: !!p.broken,
+    });
+
+    // Solo mostrar los que están aplicados al mundo (activos)
+    const resourcePacks = [
+      ...globalResourcePacks.map((p) => ({ ...p, location: 'global' })),
+      ...worldResourcePacks.map((p) => ({ ...p, location: 'world' })),
+    ]
       .filter((p) => !p.builtIn && p.uuid && appliedResourceUuids.has(p.uuid))
-      .map(mapPack);
-    const behaviorPacks = listInstalledPacks(BEHAVIOR_PACKS_DIR)
+      .map((p) => mapPack(p, p.location));
+
+    const behaviorPacks = [
+      ...globalBehaviorPacks.map((p) => ({ ...p, location: 'global' })),
+      ...worldBehaviorPacks.map((p) => ({ ...p, location: 'world' })),
+    ]
       .filter((p) => !p.builtIn && p.uuid && appliedBehaviorUuids.has(p.uuid))
-      .map(mapPack);
+      .map((p) => mapPack(p, p.location));
 
     const host = process.env.PUBLIC_SERVER_ADDRESS || req.hostname || 'localhost';
     const port = (props['server-port'] || '19132').trim();
@@ -1503,15 +1528,21 @@ app.get('/api/public/info', (req, res) => {
 });
 
 app.get('/api/public/pack-icon', (req, res) => {
-  const { type, folder } = req.query;
+  const { type, folder, location } = req.query;
   if (!['resources', 'behavior'].includes(type)) return res.status(400).end();
   const safeFolder = path.basename(folder || '');
 
   const worldPath = getCurrentWorldPath();
-  const candidates = [
-    path.join(type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR, safeFolder, 'pack_icon.png'),
-    path.join(worldPath, type === 'behavior' ? 'behavior_packs' : 'resource_packs', safeFolder, 'pack_icon.png'),
-  ];
+  const baseGlobal = type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
+  const baseWorld = path.join(
+    worldPath,
+    type === 'behavior' ? 'behavior_packs' : 'resource_packs'
+  );
+
+  // Si el cliente nos dice la ubicación, buscamos primero ahí
+  const candidates = location === 'world'
+    ? [path.join(baseWorld, safeFolder, 'pack_icon.png'), path.join(baseGlobal, safeFolder, 'pack_icon.png')]
+    : [path.join(baseGlobal, safeFolder, 'pack_icon.png'), path.join(baseWorld, safeFolder, 'pack_icon.png')];
 
   for (const iconPath of candidates) {
     if (fs.existsSync(iconPath)) return res.sendFile(iconPath);
