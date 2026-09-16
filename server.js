@@ -41,6 +41,8 @@ let busy = false;
 let pendingRestart = false;
 let cachedCurrentVersion = null;
 let cachedVersionUptime = null;
+let currentJobId = null;
+let lastJobId = null;
 
 function withLock(res, fn) {
   if (busy) {
@@ -72,8 +74,18 @@ function createJob() {
     error: null,
     meta: {},
   });
+  currentJobId = id;
   setTimeout(() => jobs.delete(id), JOB_TTL_MS);
   return id;
+}
+
+function finishJob(job, status, message, error) {
+  job.status = status;
+  job.finishedAt = Date.now();
+  if (message) job.meta.message = message;
+  if (error) job.error = error;
+  if (currentJobId === job.id) currentJobId = null;
+  lastJobId = job.id;
 }
 
 const upload = multer({
@@ -175,12 +187,30 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function zipDirToFile(sourceDir, destZipPath) {
+async function zipDirToFile(sourceDir, destZipPath, onProgress) {
   return new Promise((resolve, reject) => {
     const output = fs.createWriteStream(destZipPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
     output.on('close', resolve);
     archive.on('error', reject);
+
+    if (typeof onProgress === 'function') {
+      let lastCall = 0;
+      archive.on('progress', (data) => {
+        const now = Date.now();
+        if (now - lastCall < 500) return;
+        lastCall = now;
+        try {
+          onProgress({
+            processedBytes: data.fs.processedBytes,
+            totalBytes: data.fs.totalBytes,
+            entries: data.entries,
+            totalEntries: data.fs.totalEntries,
+          });
+        } catch (e) {}
+      });
+    }
+
     archive.pipe(output);
     archive.directory(sourceDir, false);
     archive.finalize();
@@ -714,22 +744,34 @@ app.get('/api/server/update/check', async (req, res) => {
 
 app.post('/api/server/update', (req, res) => {
   if (busy) {
+    if (currentJobId) {
+      const job = jobs.get(currentJobId);
+      if (job) return res.status(409).json({ error: 'Otra operación está en curso.', job });
+    }
     return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
   }
 
   busy = true;
   const jobId = createJob();
   const job = jobs.get(jobId);
+  job.meta.progress = 0;
+  job.meta.step = 0;
+  job.meta.totalSteps = 8;
+  job.meta.message = 'Iniciando…';
 
   res.json({ ok: true, jobId });
 
   (async () => {
     const updateTmpDir = path.join(UPLOAD_TMP, `bedrock-update-${timestamp()}`);
     try {
+      job.meta.step = 1;
+      job.meta.progress = 5;
       job.meta.message = 'Consultando la última versión…';
       const latest = await getLatestBedrockDownload();
       job.meta.latestVersion = latest.version;
 
+      job.meta.step = 2;
+      job.meta.progress = 10;
       job.meta.message = 'Deteniendo servidor…';
       let wasRunning = false;
       const proc = findPm2Process();
@@ -739,28 +781,67 @@ app.post('/api/server/update', (req, res) => {
         await sleep(2000);
       }
 
+      job.meta.step = 3;
+      job.meta.progress = 15;
       job.meta.message = 'Creando backup de seguridad…';
       const backupZip = path.join(BACKUPS_DIR, `pre-update-${timestamp()}.zip`);
-      await zipDirToFile(BEDROCK_DIR, backupZip);
+      await zipDirToFile(BEDROCK_DIR, backupZip, (p) => {
+        if (p.totalBytes > 0) {
+          const pct = Math.min(100, Math.round((p.processedBytes / p.totalBytes) * 100));
+          job.meta.progress = 15 + Math.round((pct / 100) * 30);
+          job.meta.message = `Creando backup… ${pct}% (${(p.processedBytes / 1024 / 1024).toFixed(1)} MB / ${(p.totalBytes / 1024 / 1024).toFixed(1)} MB)`;
+          job.meta.backup = {
+            processedBytes: p.processedBytes,
+            totalBytes: p.totalBytes,
+            percent: pct,
+          };
+        }
+      });
+      job.meta.backup = null;
 
+      job.meta.step = 4;
+      job.meta.progress = 45;
       job.meta.message = `Descargando versión ${latest.version}…`;
       const zipPath = path.join(updateTmpDir, 'bedrock-server.zip');
       await fsp.mkdir(updateTmpDir, { recursive: true });
       const downloadRes = await fetch(latest.url);
       if (!downloadRes.ok) throw new Error('Error al descargar el servidor.');
       const fileStream = fs.createWriteStream(zipPath);
+      const totalDownload = parseInt(downloadRes.headers.get('content-length') || '0', 10);
+      let downloadedBytes = 0;
+      let lastUpd = 0;
       await new Promise((resolve, reject) => {
+        downloadRes.body.on('data', (chunk) => {
+          downloadedBytes += chunk.length;
+          const now = Date.now();
+          if (now - lastUpd > 500 && totalDownload > 0) {
+            lastUpd = now;
+            const pct = Math.round((downloadedBytes / totalDownload) * 100);
+            job.meta.progress = 45 + Math.round((pct / 100) * 15);
+            job.meta.message = `Descargando… ${pct}% (${(downloadedBytes / 1024 / 1024).toFixed(1)} MB / ${(totalDownload / 1024 / 1024).toFixed(1)} MB)`;
+            job.meta.download = {
+              processedBytes: downloadedBytes,
+              totalBytes: totalDownload,
+              percent: pct,
+            };
+          }
+        });
         downloadRes.body.pipe(fileStream);
         downloadRes.body.on('error', reject);
         fileStream.on('finish', resolve);
       });
+      job.meta.download = null;
 
+      job.meta.step = 5;
+      job.meta.progress = 60;
       job.meta.message = 'Extrayendo nueva versión…';
       const extractDir = path.join(updateTmpDir, 'extracted');
       await fsp.mkdir(extractDir, { recursive: true });
       const zip = new AdmZip(zipPath);
       zip.extractAllTo(extractDir, true);
 
+      job.meta.step = 6;
+      job.meta.progress = 70;
       job.meta.message = 'Instalando nueva versión…';
       const preserve = [
         'server.properties',
@@ -792,9 +873,10 @@ app.post('/api/server/update', (req, res) => {
           await fsp.rename(src, path.join(BEDROCK_DIR, item));
         }
       }
-
       await rmrf(updateTmpDir);
 
+      job.meta.step = 7;
+      job.meta.progress = 90;
       if (wasRunning) {
         job.meta.message = 'Reiniciando servidor…';
         pm2Action('start');
@@ -805,15 +887,13 @@ app.post('/api/server/update', (req, res) => {
       cachedVersionUptime = null;
       updateCheckCache = { data: null, timestamp: 0 };
 
-      job.status = 'done';
-      job.finishedAt = Date.now();
-      job.meta.message = `Actualizado a la versión ${latest.version}.`;
+      job.meta.step = 8;
+      job.meta.progress = 100;
+      finishJob(job, 'done', `Actualizado a la versión ${latest.version}.`, null);
     } catch (err) {
       console.error('Error en /api/server/update:', err);
-      job.status = 'error';
-      job.error = err.message || String(err);
-      job.finishedAt = Date.now();
-      await rmrf(updateTmpDir);
+      finishJob(job, 'error', null, err.message || String(err));
+      await rmrf(updateTmpDir).catch(() => {});
     } finally {
       busy = false;
     }
@@ -821,6 +901,18 @@ app.post('/api/server/update', (req, res) => {
 });
 
 // ---------- jobs ----------
+
+app.get('/api/jobs/current', (req, res) => {
+  if (currentJobId) {
+    const job = jobs.get(currentJobId);
+    if (job) return res.json(job);
+  }
+  if (lastJobId) {
+    const job = jobs.get(lastJobId);
+    if (job) return res.json(job);
+  }
+  res.json({ status: 'idle' });
+});
 
 app.get('/api/jobs/:id', (req, res) => {
   const job = jobs.get(req.params.id);
@@ -922,20 +1014,29 @@ app.post('/api/world/create', (req, res) => {
   busy = true;
   const jobId = createJob();
   const job = jobs.get(jobId);
-  job.meta = { worldName: newName };
+  job.meta = { worldName: newName, totalSteps: 6, step: 0, progress: 0 };
 
   res.json({ ok: true, jobId, worldName: newName });
 
   (async () => {
     try {
+      job.meta.step = 1;
+      job.meta.progress = 10;
+      job.meta.message = 'Iniciando creación de mundo…';
       const oldWorldPath = getCurrentWorldPath();
       const newWorldPath = path.join(WORLDS_DIR, newName);
 
       if (fs.existsSync(oldWorldPath)) {
+        job.meta.step = 2;
+        job.meta.progress = 20;
+        job.meta.message = 'Creando backup del mundo actual…';
         const backupZip = path.join(BACKUPS_DIR, `world-backup-${timestamp()}.zip`);
         await zipDirToFile(oldWorldPath, backupZip);
       }
 
+      job.meta.step = 3;
+      job.meta.progress = 45;
+      job.meta.message = 'Deteniendo servidor…';
       let wasRunning = false;
       const proc = findPm2Process();
       if (proc && proc.pm2_env.status === 'online') {
@@ -944,6 +1045,9 @@ app.post('/api/world/create', (req, res) => {
         await sleep(1500);
       }
 
+      job.meta.step = 4;
+      job.meta.progress = 60;
+      job.meta.message = 'Aplicando configuración…';
       updateProperties({
         'level-name': newName,
         'gamemode': gamemode,
@@ -960,16 +1064,20 @@ app.post('/api/world/create', (req, res) => {
       }
       await rmrf(oldWorldPath);
 
-      if (wasRunning) pm2Action('start');
+      job.meta.step = 5;
+      job.meta.progress = 85;
+      if (wasRunning) {
+        job.meta.message = 'Reiniciando servidor…';
+        pm2Action('start');
+      }
       pendingRestart = false;
 
-      job.status = 'done';
-      job.finishedAt = Date.now();
+      job.meta.step = 6;
+      job.meta.progress = 100;
+      finishJob(job, 'done', `Mundo "${newName}" creado.`, null);
     } catch (err) {
       console.error('Error en /api/world/create:', err);
-      job.status = 'error';
-      job.error = err.message || String(err);
-      job.finishedAt = Date.now();
+      finishJob(job, 'error', null, err.message || String(err));
     } finally {
       busy = false;
     }
@@ -1577,10 +1685,16 @@ async function runAutoBackup() {
   }
 
   busy = true;
+  const jobId = createJob();
+  const job = jobs.get(jobId);
+  job.meta.type = 'auto-backup';
+  job.meta.progress = 0;
+  job.meta.message = 'Iniciando backup automático…';
+
   try {
     const worldPath = getCurrentWorldPath();
     if (!fs.existsSync(worldPath)) {
-      console.log('[auto-backup] No se encontró el mundo actual, saltando.');
+      finishJob(job, 'error', null, 'No se encontró el mundo actual.');
       return;
     }
 
@@ -1588,10 +1702,14 @@ async function runAutoBackup() {
     const destName = `${AUTO_BACKUP_PREFIX}${stamp}.zip`;
     const destPath = path.join(BACKUPS_DIR, destName);
 
-    console.log(`[auto-backup] Creando backup: ${destName}`);
-    await zipDirToFile(worldPath, destPath);
-    const stats = fs.statSync(destPath);
-    console.log(`[auto-backup] Backup creado: ${destName} (${(stats.size / 1024 / 1024).toFixed(1)} MB)`);
+    job.meta.message = 'Creando backup…';
+    await zipDirToFile(worldPath, destPath, (p) => {
+      if (p.totalBytes > 0) {
+        const pct = Math.min(100, Math.round((p.processedBytes / p.totalBytes) * 100));
+        job.meta.progress = pct;
+        job.meta.message = `Creando backup… ${pct}% (${(p.processedBytes / 1024 / 1024).toFixed(1)} MB / ${(p.totalBytes / 1024 / 1024).toFixed(1)} MB)`;
+      }
+    });
 
     const autoBackups = fs
       .readdirSync(BACKUPS_DIR)
@@ -1605,12 +1723,12 @@ async function runAutoBackup() {
     const toDelete = autoBackups.slice(AUTO_BACKUP_KEEP);
     for (const f of toDelete) {
       fs.unlinkSync(f.path);
-      console.log(`[auto-backup] Eliminado backup antiguo: ${f.name}`);
     }
 
-    console.log(`[auto-backup] Completado. Conservados ${Math.min(autoBackups.length, AUTO_BACKUP_KEEP)} backups automáticos.`);
+    finishJob(job, 'done', `Backup automático completado (${destName}).`, null);
   } catch (e) {
     console.error('[auto-backup] Error:', e);
+    finishJob(job, 'error', null, e.message || String(e));
   } finally {
     busy = false;
   }

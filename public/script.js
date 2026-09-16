@@ -221,31 +221,12 @@ on('formCreateWorld', 'submit', async (e) => {
       body: JSON.stringify(body),
     });
 
-    let done = false;
-    while (!done) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const job = await api(`api/jobs/${encodeURIComponent(jobId)}`);
-      if (job.status === 'done') {
-        if (msg) {
-          msg.textContent = '¡Mundo creado! El servidor está regenerando el mundo.';
-          msg.className = 'msg success';
-        }
-        done = true;
-        setTimeout(refreshStatus, 2000);
-        loadBackups();
-      } else if (job.status === 'error') {
-        if (msg) {
-          msg.textContent = `Error: ${job.error}`;
-          msg.className = 'msg error';
-        }
-        done = true;
-      } else {
-        const secs = Math.round((Date.now() - job.startedAt) / 1000);
-        if (msg) {
-          msg.textContent = `Creando mundo… (${secs}s) — no cierres esta pestaña.`;
-          msg.className = 'msg';
-        }
-      }
+    showJobModal({ id: jobId, status: 'running', meta: { message: 'Creando mundo…', progress: 0, step: 1, totalSteps: 6 } });
+    startJobPolling();
+
+    if (msg) {
+      msg.textContent = 'Creando mundo… sigue el progreso en el modal.';
+      msg.className = 'msg';
     }
   } catch (err) {
     if (msg) {
@@ -305,54 +286,149 @@ async function checkForUpdates(force = false) {
   }
 }
 
-async function applyUpdate() {
-  const msg = $('updateMsg');
-  const btnUpdate = $('btnUpdateServer');
-  const btnBanner = $('btnUpdateFromBanner');
-  if (!confirm('Esto detendrá el servidor, hará un backup completo y aplicará la actualización. ¿Continuar?')) return;
+// ============================================================
+//  Jobs (update, backup) — barra de progreso persistente
+// ============================================================
+let jobPollInterval = null;
 
-  if (btnUpdate) btnUpdate.disabled = true;
-  if (btnBanner) btnBanner.disabled = true;
-  if (msg) {
-    msg.textContent = 'Iniciando actualización…';
-    msg.className = 'msg';
+function showJobModal(job) {
+  const modal = $('jobModal');
+  if (!modal) return;
+  modal.style.display = 'flex';
+
+  const title = $('jobTitle');
+  const status = $('jobStatus');
+  const bar = $('jobProgressBar');
+  const percent = $('jobPercent');
+  const step = $('jobStep');
+  const message = $('jobMessage');
+  const errEl = $('jobError');
+  const closeBtn = $('jobClose');
+
+  const isError = job.status === 'error';
+  const isDone = job.status === 'done';
+  const isRunning = job.status === 'running';
+
+  let typeLabel = 'Actualización';
+  if (job.meta?.type === 'auto-backup') typeLabel = 'Backup automático';
+  else if (job.meta?.worldName) typeLabel = 'Creación de mundo';
+
+  if (title) title.textContent = isError ? `${typeLabel} — Error` : isDone ? `${typeLabel} — Completado` : `${typeLabel} en curso…`;
+
+  if (status) {
+    status.textContent = isError ? 'Error' : isDone ? 'Completado' : 'En progreso';
+    status.className = 'job-status ' + (isError ? 'status-error' : isDone ? 'status-done' : 'status-running');
   }
 
+  const pct = typeof job.meta?.progress === 'number' ? job.meta.progress : 0;
+  if (bar) bar.style.width = pct + '%';
+  if (percent) percent.textContent = pct + '%';
+
+  if (step && job.meta?.totalSteps) {
+    step.textContent = `Paso ${job.meta.step || 0} / ${job.meta.totalSteps}`;
+  } else if (step) {
+    step.textContent = '';
+  }
+
+  if (message) {
+    if (job.meta?.message) message.textContent = job.meta.message;
+    else if (isError && job.error) message.textContent = '';
+    else if (isDone) message.textContent = 'Operación completada.';
+    else message.textContent = '—';
+  }
+
+  if (errEl) {
+    if (isError && job.error) {
+      errEl.textContent = job.error;
+      errEl.style.display = 'block';
+    } else {
+      errEl.style.display = 'none';
+    }
+  }
+
+  if (closeBtn) closeBtn.style.display = isRunning ? 'none' : 'inline-flex';
+}
+
+function hideJobModal() {
+  const modal = $('jobModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function stopJobPolling() {
+  if (jobPollInterval) {
+    clearInterval(jobPollInterval);
+    jobPollInterval = null;
+  }
+}
+
+async function pollCurrentJob() {
   try {
-    const { jobId } = await api('api/server/update', { method: 'POST' });
-    let done = false;
-    while (!done) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const job = await api(`api/jobs/${encodeURIComponent(jobId)}`);
-      if (job.status === 'done') {
-        if (msg) {
-          msg.textContent = job.meta?.message || 'Servidor actualizado correctamente.';
-          msg.className = 'msg success';
-        }
-        done = true;
-        const banner = $('updateBanner');
-        if (banner) banner.style.display = 'none';
-        setTimeout(() => checkForUpdates(true), 3000);
+    const job = await api('api/jobs/current');
+    if (!job || job.status === 'idle') {
+      stopJobPolling();
+      return;
+    }
+
+    showJobModal(job);
+
+    if (job.status !== 'running') {
+      stopJobPolling();
+      setTimeout(() => {
         refreshStatus();
         loadBackups();
-      } else if (job.status === 'error') {
-        if (msg) {
-          msg.textContent = `Error: ${job.error}`;
-          msg.className = 'msg error';
-        }
-        done = true;
-      } else {
-        const secs = Math.round((Date.now() - job.startedAt) / 1000);
-        if (msg) {
-          msg.textContent = `${job.meta?.message || 'Actualizando…'} (${secs}s)`;
-          msg.className = 'msg';
-        }
+      }, 1500);
+    }
+  } catch (e) {
+    /* silencio */
+  }
+}
+
+function startJobPolling() {
+  stopJobPolling();
+  pollCurrentJob();
+  jobPollInterval = setInterval(pollCurrentJob, 1500);
+}
+
+async function resumeCurrentJob() {
+  try {
+    const job = await api('api/jobs/current');
+    if (job && job.status === 'running') {
+      showJobModal(job);
+      startJobPolling();
+    } else if (job && (job.status === 'done' || job.status === 'error')) {
+      const age = job.finishedAt ? Date.now() - job.finishedAt : Infinity;
+      if (age < 5 * 60 * 1000) {
+        showJobModal(job);
       }
     }
+  } catch (e) {
+    /* silencio */
+  }
+}
+
+on('jobClose', 'click', hideJobModal);
+
+async function applyUpdate() {
+  if (!confirm('Esto detendrá el servidor, hará un backup completo y aplicará la actualización. ¿Continuar?')) return;
+
+  const btnUpdate = $('btnUpdateServer');
+  const btnBanner = $('btnUpdateFromBanner');
+  if (btnUpdate) btnUpdate.disabled = true;
+  if (btnBanner) btnBanner.disabled = true;
+
+  try {
+    const result = await api('api/server/update', { method: 'POST' });
+
+    if (!result.ok) throw new Error(result.error || 'No se pudo iniciar la actualización.');
+
+    showJobModal({ id: result.jobId, status: 'running', meta: { message: 'Iniciando…', progress: 0, step: 1, totalSteps: 8 } });
+    startJobPolling();
   } catch (err) {
-    if (msg) {
-      msg.textContent = err.message;
-      msg.className = 'msg error';
+    // Podría ser 409 (ya hay uno en curso) — intentamos seguir el job en curso
+    if (err.message?.includes('en curso') || err.message?.includes('curso')) {
+      startJobPolling();
+    } else {
+      alert(err.message);
     }
   } finally {
     if (btnUpdate) btnUpdate.disabled = false;
@@ -750,7 +826,10 @@ on('skinModal', 'click', (e) => {
   if (e.target.id === 'skinModal') closeSkinModal();
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeSkinModal();
+  if (e.key === 'Escape') {
+    closeSkinModal();
+    hideJobModal();
+  }
 });
 
 // ============================================================
@@ -899,6 +978,9 @@ loadAddons();
 refreshConsole();
 loadPlayers();
 loadChat();
+
+// Recuperar job en curso si existe
+resumeCurrentJob();
 
 checkForUpdates(false);
 autoUpdateCheckInterval = setInterval(() => checkForUpdates(false), 30 * 60 * 1000);

@@ -856,6 +856,81 @@ input[type="file"] {
 #skinCanvas:active { cursor: grabbing; }
 
 /* ============================================================
+   Modal de progreso de jobs
+   ============================================================ */
+.job-modal {
+  max-width: 520px;
+}
+
+.job-body {
+  display: block;
+  padding: 20px;
+  background: var(--panel);
+}
+
+.job-status {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.status-running { color: var(--blue); }
+.status-done    { color: var(--green); }
+.status-error   { color: var(--red); }
+
+.job-progress-track {
+  height: 12px;
+  background: #0d1219;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  position: relative;
+}
+
+.job-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue), var(--green));
+  transition: width 0.4s ease;
+  border-radius: 999px;
+}
+
+.job-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+#jobPercent {
+  font-weight: 700;
+  color: var(--text);
+  font-family: 'SF Mono', Consolas, monospace;
+}
+
+.job-message {
+  font-size: 13px;
+  color: var(--text);
+  background: #0d1219;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'SF Mono', Consolas, monospace;
+  word-break: break-word;
+  min-height: 40px;
+}
+
+#jobError {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(240,87,107,0.1);
+  border: 1px solid rgba(240,87,107,0.3);
+}
+
+/* ============================================================
    Responsive — Tablet
    ============================================================ */
 @media (max-width: 900px) {
@@ -1032,4 +1107,8 @@ input[type="file"] {
   .icon-lg { width: 18px; height: 18px; }
 
   .modal-body { padding: 10px; }
+
+  .job-modal { max-width: 100%; }
+  .job-body { padding: 14px; }
+  .job-message { font-size: 12px; }
 }
