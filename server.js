@@ -1464,11 +1464,18 @@ app.get('/api/public/info', (req, res) => {
       broken: !!p.broken,
     });
 
+        // Leer qué packs están realmente aplicados al mundo actual
+    const appliedResources = readWorldPackList('world_resource_packs.json');
+    const appliedBehaviors = readWorldPackList('world_behavior_packs.json');
+    const appliedResourceUuids = new Set(appliedResources.map((p) => p.pack_id));
+    const appliedBehaviorUuids = new Set(appliedBehaviors.map((p) => p.pack_id));
+
+    // Solo mostrar los que están aplicados (activos) en el mundo
     const resourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR)
-      .filter((p) => !p.builtIn)
+      .filter((p) => !p.builtIn && p.uuid && appliedResourceUuids.has(p.uuid))
       .map(mapPack);
     const behaviorPacks = listInstalledPacks(BEHAVIOR_PACKS_DIR)
-      .filter((p) => !p.builtIn)
+      .filter((p) => !p.builtIn && p.uuid && appliedBehaviorUuids.has(p.uuid))
       .map(mapPack);
 
     const host = process.env.PUBLIC_SERVER_ADDRESS || req.hostname || 'localhost';
