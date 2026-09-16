@@ -198,7 +198,6 @@ async function zipDirToFile(sourceDir, destZipPath, onProgress, ignore = []) {
     // Ignorar entradas no soportadas (FIFOs, sockets, etc.) sin abortar
     archive.on('warning', (err) => {
       if (err.code === 'ENOENT') return;
-      // Silencioso: los ENTRYNOTSUPPORTED son de console.fifo u otros pipes
       if (err.code !== 'ENTRYNOTSUPPORTED') {
         console.warn('[zip] warning:', err.code, err.message);
       }
@@ -772,7 +771,7 @@ app.post('/api/server/update', (req, res) => {
   const job = jobs.get(jobId);
   job.meta.progress = 0;
   job.meta.step = 0;
-  job.meta.totalSteps = 8;
+  job.meta.totalSteps = 9;
   job.meta.message = 'Iniciando…';
 
   res.json({ ok: true, jobId });
@@ -827,7 +826,6 @@ app.post('/api/server/update', (req, res) => {
       let downloadedBytes = 0;
       let lastUpd = 0;
 
-      // Node 18+ fetch devuelve un Web ReadableStream — lo convertimos a Node Stream
       const { Readable } = require('stream');
       const nodeStream = Readable.fromWeb(downloadRes.body);
 
@@ -862,6 +860,13 @@ app.post('/api/server/update', (req, res) => {
       const zip = new AdmZip(zipPath);
       zip.extractAllTo(extractDir, true);
 
+      // Permisos de ejecución del binario recién extraído (AdmZip no los preserva)
+      try {
+        fs.chmodSync(path.join(extractDir, 'bedrock_server'), 0o755);
+      } catch (e) {
+        console.warn('[update] No se pudo aplicar chmod al bedrock_server extraído:', e.message);
+      }
+
       job.meta.step = 6;
       job.meta.progress = 70;
       job.meta.message = 'Instalando nueva versión…';
@@ -874,6 +879,14 @@ app.post('/api/server/update', (req, res) => {
         'resource_packs',
         'behavior_packs',
         'console.fifo',
+        'start.sh',
+        'start.bat',
+        'config',
+        'premium_cache',
+        'development_behavior_packs',
+        'development_resource_packs',
+        'development_skin_packs',
+        'minecraftpe',
       ];
       const preserveTmp = path.join(updateTmpDir, 'preserve');
       await fsp.mkdir(preserveTmp, { recursive: true });
@@ -897,14 +910,11 @@ app.post('/api/server/update', (req, res) => {
       await fsp.cp(extractDir, BEDROCK_DIR, { recursive: true });
 
       // 4. Restaurar lo preservado: borrar el destino primero si existe
-      //    (el ZIP trae sus propias carpetas resource_packs/, behavior_packs/,
-      //    worlds/ con packs vanilla, hay que quitarlas antes del rename)
       for (const item of preserve) {
         const src = path.join(preserveTmp, item);
         if (!fs.existsSync(src)) continue;
 
         const dest = path.join(BEDROCK_DIR, item);
-        // Si el destino ya existe (porque el ZIP lo trae), borrarlo primero
         if (fs.existsSync(dest)) {
           await rmrf(dest);
         }
@@ -913,7 +923,24 @@ app.post('/api/server/update', (req, res) => {
       await rmrf(updateTmpDir);
 
       job.meta.step = 7;
-      job.meta.progress = 90;
+      job.meta.progress = 85;
+      job.meta.message = 'Restaurando permisos de ejecución…';
+      // Asegurar permisos de ejecución tras la restauración
+      try {
+        fs.chmodSync(path.join(BEDROCK_DIR, 'bedrock_server'), 0o755);
+      } catch (e) {
+        console.warn('[update] No se pudo aplicar chmod al bedrock_server final:', e.message);
+      }
+      try {
+        if (fs.existsSync(path.join(BEDROCK_DIR, 'start.sh'))) {
+          fs.chmodSync(path.join(BEDROCK_DIR, 'start.sh'), 0o755);
+        }
+      } catch (e) {
+        console.warn('[update] No se pudo aplicar chmod al start.sh:', e.message);
+      }
+
+      job.meta.step = 8;
+      job.meta.progress = 92;
       if (wasRunning) {
         job.meta.message = 'Reiniciando servidor…';
         pm2Action('start');
@@ -924,7 +951,7 @@ app.post('/api/server/update', (req, res) => {
       cachedVersionUptime = null;
       updateCheckCache = { data: null, timestamp: 0 };
 
-      job.meta.step = 8;
+      job.meta.step = 9;
       job.meta.progress = 100;
       finishJob(job, 'done', `Actualizado a la versión ${latest.version}.`, null);
     } catch (err) {
