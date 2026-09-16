@@ -37,6 +37,8 @@ fs.mkdirSync(PANEL_DATA_DIR, { recursive: true });
 
 let busy = false;
 let pendingRestart = false;
+let cachedCurrentVersion = null;
+let cachedVersionUptime = null;
 
 function withLock(res, fn) {
   if (busy) {
@@ -440,7 +442,14 @@ function pollServerLog() {
     return;
   }
 
-  if (size < logReadOffset) logReadOffset = 0;
+  // Si el log se truncó o rotó, perdimos los eventos. Limpiar estado.
+  if (size < logReadOffset) {
+    if (onlineSet.size > 0) {
+      console.log(`[panel] Log truncado — limpiando ${onlineSet.size} jugadores online`);
+    }
+    logReadOffset = 0;
+    onlineSet.clear();
+  }
   if (size === logReadOffset) return;
 
   const fd = fs.openSync(logPaths.out, 'r');
@@ -455,8 +464,19 @@ function pollServerLog() {
 
   const connectRe = /Player connected:\s*([^,]+),\s*xuid:\s*(\d+)/i;
   const disconnectRe = /Player disconnected:\s*([^,]+),\s*xuid:\s*(\d+)/i;
+  // Detecta un arranque nuevo del servidor. Cuando pasa, todos los que
+  // estuvieran "online" ya no lo están (el server los tiró al reiniciar).
+  const serverStartRe = /Server started\./i;
 
   for (const line of lines) {
+    if (serverStartRe.test(line)) {
+      if (onlineSet.size > 0) {
+        console.log(`[panel] Server reiniciado — limpiando ${onlineSet.size} jugadores online`);
+      }
+      onlineSet.clear();
+      continue;
+    }
+
     const connectMatch = line.match(connectRe);
     const disconnectMatch = line.match(disconnectRe);
     if (connectMatch) {
@@ -507,53 +527,75 @@ async function getLatestBedrockDownload() {
 }
 
 function getCurrentBedrockVersion() {
+  const proc = findPm2Process();
+  const currentUptime = proc?.pm2_env?.pm_uptime || 0;
+
+  // Si el servidor no ha reiniciado desde la última lectura, devolver caché
+  if (cachedCurrentVersion && cachedVersionUptime === currentUptime) {
+    return cachedCurrentVersion;
+  }
+
+  let version = null;
+
   // 1. version.json (formato oficial del BDS)
   const versionFile = path.join(BEDROCK_DIR, 'version.json');
   if (fs.existsSync(versionFile)) {
     try {
       const data = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
-      return data.version || data.serverVersion || null;
+      version = data.version || data.serverVersion || null;
     } catch (e) {}
   }
 
-  // 2. Fallback: leer el log de PM2 y buscar la línea "Version: X.Y.Z.W"
-  //    BDS imprime esto en stdout al arrancar.
-  try {
-    const logPaths = getPm2LogPaths();
-    if (logPaths && logPaths.out && fs.existsSync(logPaths.out)) {
-      // Buscar en las últimas 500 líneas del log de salida
-      const tail = execSync(`tail -n 500 "${logPaths.out}"`, { encoding: 'utf8', maxBuffer: 5 * 1024 * 1024 });
-      const match = tail.match(/Version[:\s]+(\d+\.\d+\.\d+(?:\.\d+)?)/);
-      if (match) return match[1];
-    }
-  } catch (e) {}
+  // 2. Buscar en TODO el log (no solo las últimas 500 líneas) la ÚLTIMA
+  //    línea "Version: X.Y.Z.W". Así funciona aunque el log sea enorme.
+  if (!version) {
+    try {
+      const logPaths = getPm2LogPaths();
+      if (logPaths && logPaths.out && fs.existsSync(logPaths.out)) {
+        const out = execSync(
+          `grep -a -E "Version[[:space:]]*:[[:space:]]*[0-9]+\\.[0-9]+\\.[0-9]+" "${logPaths.out}" | tail -1`,
+          { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 }
+        );
+        const m = out.match(/Version[:\s]+(\d+\.\d+\.\d+(?:\.\d+)?)/);
+        if (m) version = m[1];
+      }
+    } catch (e) {}
+  }
 
-  // 3. Fallback: buscar el zip original en la carpeta
-  try {
-    const files = fs.readdirSync(BEDROCK_DIR);
-    const versionedFile = files.find(f => f.startsWith('bedrock-server-') && f.endsWith('.zip'));
-    if (versionedFile) {
-      const match = versionedFile.match(/bedrock-server-([\d.]+)\.zip/);
-      if (match) return match[1];
-    }
-  } catch (e) {}
+  // 3. Fallback: nombre del zip original
+  if (!version) {
+    try {
+      const files = fs.readdirSync(BEDROCK_DIR);
+      const versionedFile = files.find(f => f.startsWith('bedrock-server-') && f.endsWith('.zip'));
+      if (versionedFile) {
+        const m = versionedFile.match(/bedrock-server-([\d.]+)\.zip/);
+        if (m) version = m[1];
+      }
+    } catch (e) {}
+  }
 
-  // 4. Último recurso (mucho más específico): buscar en el binario la cadena
-  //    que BDS usa internamente. Es "1.21.51.02" o similar, siempre con 3 o 4
-  //    componentes numéricos separados por puntos, precedido por "BDS" o "Version".
-  try {
-    const bin = path.join(BEDROCK_DIR, 'bedrock_server');
-    if (fs.existsSync(bin)) {
-      const out = execSync(
-        `strings "${bin}" | grep -oE "(BDS v|Version[ :]+)[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?" | head -1`,
-        { encoding: 'utf8', maxBuffer: 5 * 1024 * 1024 }
-      );
-      const match = out.match(/([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)/);
-      if (match) return match[1];
-    }
-  } catch (e) {}
+  // 4. Último recurso: extraer del binario
+  if (!version) {
+    try {
+      const bin = path.join(BEDROCK_DIR, 'bedrock_server');
+      if (fs.existsSync(bin)) {
+        const out = execSync(
+          `strings "${bin}" | grep -oE "(BDS v|Version[ :]+)[0-9]+\\.[0-9]+\\.[0-9]+(\\.[0-9]+)?" | head -1`,
+          { encoding: 'utf8', maxBuffer: 5 * 1024 * 1024 }
+        );
+        const m = out.match(/([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)/);
+        if (m) version = m[1];
+      }
+    } catch (e) {}
+  }
 
-  return null;
+  // Solo cachear si la encontramos. Si no, reintentar en la próxima llamada.
+  if (version) {
+    cachedCurrentVersion = version;
+    cachedVersionUptime = currentUptime;
+  }
+
+  return version;
 }
 
 // ---------- routes: status & server control ----------
@@ -622,8 +664,24 @@ app.get('/api/server/update/check', async (req, res) => {
 
     const current = getCurrentBedrockVersion();
     const latest = await getLatestBedrockDownload();
-    const updateAvailable = !current || current !== latest.version;
-    const data = { current, latest: latest.version, updateAvailable, downloadUrl: latest.url, checkedAt: now };
+
+    // Si no podemos leer la versión actual, NO afirmamos que hay update.
+    // Solo mostramos la versión nueva detectada, sin decir "desconocida" como actual.
+    let updateAvailable;
+    if (!current) {
+      updateAvailable = false;
+      console.log('[panel] No se pudo determinar la versión actual — update check omitido');
+    } else {
+      updateAvailable = current !== latest.version;
+    }
+
+    const data = {
+      current,
+      latest: latest.version,
+      updateAvailable,
+      downloadUrl: latest.url,
+      checkedAt: now,
+    };
 
     updateCheckCache = { data, timestamp: now };
     res.json(data);
@@ -721,6 +779,11 @@ app.post('/api/server/update', (req, res) => {
         pm2Action('start');
       }
       pendingRestart = false;
+
+      // Invalidar caché de versión tras una actualización
+      cachedCurrentVersion = null;
+      cachedVersionUptime = null;
+      updateCheckCache = { data: null, timestamp: 0 };
 
       job.status = 'done';
       job.finishedAt = Date.now();
