@@ -180,6 +180,7 @@ button, input, select, textarea {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .card h3 {
@@ -508,6 +509,81 @@ input[type="file"] {
 }
 
 /* ============================================================
+   Chat en vivo
+   ============================================================ */
+.badge {
+  display: inline-block;
+  min-width: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: clamp(200px, 35vh, 320px);
+  overflow-y: auto;
+  background: #0d1219;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  font-size: 13px;
+  margin-bottom: 10px;
+  scroll-behavior: smooth;
+}
+
+.chat-message {
+  display: flex;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  line-height: 1.4;
+  align-items: baseline;
+}
+
+.chat-message:hover { background: rgba(255,255,255,0.03); }
+
+.chat-time {
+  color: var(--muted);
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 11px;
+  flex-shrink: 0;
+  min-width: 42px;
+}
+
+.chat-name {
+  color: var(--blue);
+  font-weight: 600;
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-name::after {
+  content: ':';
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.chat-text {
+  color: var(--text);
+  word-break: break-word;
+  min-width: 0;
+  flex: 1;
+}
+
+/* ============================================================
    Create-world form
    ============================================================ */
 .create-world-form {
@@ -833,7 +909,6 @@ input[type="file"] {
     width: 100%;
   }
 
-  /* Packs: apilar en columna */
   .pack-item {
     flex-wrap: wrap;
   }
@@ -855,7 +930,6 @@ input[type="file"] {
     border-top: 1px solid var(--panel-border);
   }
 
-  /* Players: stack vertical con labels */
   .players-table-header { display: none; }
 
   .player-row {
@@ -903,6 +977,13 @@ input[type="file"] {
   .gamemode-select {
     width: 100%;
   }
+
+  .chat-message {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .chat-name { max-width: none; }
+  .chat-text { flex-basis: 100%; padding-left: 50px; }
 }
 
 /* ============================================================

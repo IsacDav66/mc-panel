@@ -26,7 +26,9 @@ const PERMISSIONS_FILE = path.join(BEDROCK_DIR, 'permissions.json');
 const PANEL_DATA_DIR = path.join(BEDROCK_DIR, 'panel-data');
 const PLAYERS_FILE = path.join(PANEL_DATA_DIR, 'players.json');
 const EVENTS_FILE = path.join(PANEL_DATA_DIR, 'events.json');
+const CHAT_FILE = path.join(PANEL_DATA_DIR, 'chat.json');
 const MAX_EVENTS = 1000;
+const MAX_CHAT = 500;
 
 const UPLOAD_TMP = path.join(os.tmpdir(), 'mc-panel-uploads');
 fs.mkdirSync(UPLOAD_TMP, { recursive: true });
@@ -88,8 +90,6 @@ const requireAuth = basicAuth({
   realm: 'MC Bedrock Panel',
 });
 
-// Rutas públicas — accesibles sin autenticación.
-// Todo lo demás (panel admin y /api/* que no sea /api/public/*) sigue protegido.
 const PUBLIC_PATHS = new Set([
   '/info',
   '/info.html',
@@ -194,10 +194,10 @@ async function rmrf(p) {
 function cleanText(s) {
   if (!s) return '';
   return String(s)
-    .replace(/§./g, '')         // códigos de color §x
-    .replace(/[\t\r\n]+/g, ' ')  // tabs y saltos → espacio
-    .replace(/\s+/g, ' ')        // múltiples espacios → uno
-    .replace(/\s*#+\s*$/g, '')   // ### del final
+    .replace(/§./g, '')
+    .replace(/[\t\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*#+\s*$/g, '')
     .trim();
 }
 
@@ -217,35 +217,21 @@ function normalizeVersion(v) {
   return [1, 0, 0];
 }
 
-// Los packs del BDS vienen en minúsculas exactas. Cualquier carpeta con
-// mayúsculas es de un usuario y nunca debe considerarse built-in.
 const BUILTIN_EXACT = new Set([
-  'vanilla',
-  'chemistry',
-  'editor',
-  'server_editor_library',
-  'server_library',
-  'server_ui_library',
-  'image_experiment',
-  'physics',
+  'vanilla', 'chemistry', 'editor', 'server_editor_library', 'server_library',
+  'server_ui_library', 'image_experiment', 'physics',
 ]);
 
 const BUILTIN_PREFIXES = [
-  'vanilla_',
-  'chemistry_',
-  'physics_',
-  'experimental_',
-  'image_experiment_',
+  'vanilla_', 'chemistry_', 'physics_', 'experimental_', 'image_experiment_',
 ];
 
 function isBuiltInFolder(folderName) {
-  // BDS usa siempre minúsculas para sus carpetas internas.
   if (folderName !== folderName.toLowerCase()) return false;
   if (BUILTIN_EXACT.has(folderName)) return true;
   return BUILTIN_PREFIXES.some((p) => folderName.startsWith(p));
 }
 
-// Algunos manifiestos internos usan este name para marcarse como sistema.
 const BUILTIN_NAME_PATTERN = /^(resourcePack|behaviorPack)\./i;
 
 function isBuiltInPack(folderName, builtInByName) {
@@ -290,11 +276,8 @@ function readManifest(dir) {
   if (!fs.existsSync(manifestPath)) return null;
   try {
     let raw = fs.readFileSync(manifestPath, 'utf8');
-
-    // Quitar BOM UTF-8 (los packs internos del BDS lo llevan)
     if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
     raw = raw.replace(/^\uFEFF/, '').trim();
-
     const data = JSON.parse(raw);
 
     const headerUuid = data.header && data.header.uuid;
@@ -437,6 +420,21 @@ function appendEvent(event) {
   writeJson(EVENTS_FILE, events);
 }
 
+function loadChat() {
+  return readJson(CHAT_FILE, []);
+}
+
+function saveChat(messages) {
+  writeJson(CHAT_FILE, messages);
+}
+
+function appendChat(name, message) {
+  const messages = loadChat();
+  messages.push({ name, message, timestamp: new Date().toISOString() });
+  while (messages.length > MAX_CHAT) messages.shift();
+  saveChat(messages);
+}
+
 function touchPlayer(name, xuid, isOnline) {
   const players = loadPlayers();
   const key = xuid || name;
@@ -465,7 +463,6 @@ function pollServerLog() {
     return;
   }
 
-  // Si el log se truncó o rotó, perdimos los eventos. Limpiar estado.
   if (size < logReadOffset) {
     if (onlineSet.size > 0) {
       console.log(`[panel] Log truncado — limpiando ${onlineSet.size} jugadores online`);
@@ -487,9 +484,9 @@ function pollServerLog() {
 
   const connectRe = /Player connected:\s*([^,]+),\s*xuid:\s*(\d+)/i;
   const disconnectRe = /Player disconnected:\s*([^,]+),\s*xuid:\s*(\d+)/i;
-  // Detecta un arranque nuevo del servidor. Cuando pasa, todos los que
-  // estuvieran "online" ya no lo están (el server los tiró al reiniciar).
   const serverStartRe = /Server started\./i;
+  const chatRe = /<\s*([^>\n]{1,50}?)\s*>\s*(.+)$/;
+  const serverMsgRe = /\[Server\]\s*(.+)$/;
 
   for (const line of lines) {
     if (serverStartRe.test(line)) {
@@ -502,6 +499,7 @@ function pollServerLog() {
 
     const connectMatch = line.match(connectRe);
     const disconnectMatch = line.match(disconnectRe);
+
     if (connectMatch) {
       const name = connectMatch[1].trim();
       const xuid = connectMatch[2].trim();
@@ -514,6 +512,16 @@ function pollServerLog() {
       onlineSet.delete(xuid);
       touchPlayer(name, xuid, false);
       appendEvent({ type: 'leave', name, xuid, timestamp: new Date().toISOString() });
+    } else if (line.includes('INFO]')) {
+      let m;
+      if ((m = line.match(chatRe))) {
+        const chatName = cleanText(m[1]);
+        const chatMsg = cleanText(m[2]);
+        if (chatName && chatMsg) appendChat(chatName, chatMsg);
+      } else if ((m = line.match(serverMsgRe))) {
+        const chatMsg = cleanText(m[1]);
+        if (chatMsg) appendChat('Server', chatMsg);
+      }
     }
   }
 }
@@ -553,14 +561,12 @@ function getCurrentBedrockVersion() {
   const proc = findPm2Process();
   const currentUptime = proc?.pm2_env?.pm_uptime || 0;
 
-  // Si el servidor no ha reiniciado desde la última lectura, devolver caché
   if (cachedCurrentVersion && cachedVersionUptime === currentUptime) {
     return cachedCurrentVersion;
   }
 
   let version = null;
 
-  // 1. version.json (formato oficial del BDS)
   const versionFile = path.join(BEDROCK_DIR, 'version.json');
   if (fs.existsSync(versionFile)) {
     try {
@@ -569,8 +575,6 @@ function getCurrentBedrockVersion() {
     } catch (e) {}
   }
 
-  // 2. Buscar en TODO el log (no solo las últimas 500 líneas) la ÚLTIMA
-  //    línea "Version: X.Y.Z.W". Así funciona aunque el log sea enorme.
   if (!version) {
     try {
       const logPaths = getPm2LogPaths();
@@ -585,7 +589,6 @@ function getCurrentBedrockVersion() {
     } catch (e) {}
   }
 
-  // 3. Fallback: nombre del zip original
   if (!version) {
     try {
       const files = fs.readdirSync(BEDROCK_DIR);
@@ -597,7 +600,6 @@ function getCurrentBedrockVersion() {
     } catch (e) {}
   }
 
-  // 4. Último recurso: extraer del binario
   if (!version) {
     try {
       const bin = path.join(BEDROCK_DIR, 'bedrock_server');
@@ -612,7 +614,6 @@ function getCurrentBedrockVersion() {
     } catch (e) {}
   }
 
-  // Solo cachear si la encontramos. Si no, reintentar en la próxima llamada.
   if (version) {
     cachedCurrentVersion = version;
     cachedVersionUptime = currentUptime;
@@ -672,9 +673,8 @@ app.get('/api/server/properties', (req, res) => {
 
 // ---------- routes: updater ----------
 
-// Cache para no golpear la API de Mojang en cada carga del panel
 let updateCheckCache = { data: null, timestamp: 0 };
-const UPDATE_CACHE_TTL = 60 * 60 * 1000; // 1 hora
+const UPDATE_CACHE_TTL = 60 * 60 * 1000;
 
 app.get('/api/server/update/check', async (req, res) => {
   try {
@@ -688,8 +688,6 @@ app.get('/api/server/update/check', async (req, res) => {
     const current = getCurrentBedrockVersion();
     const latest = await getLatestBedrockDownload();
 
-    // Si no podemos leer la versión actual, NO afirmamos que hay update.
-    // Solo mostramos la versión nueva detectada, sin decir "desconocida" como actual.
     let updateAvailable;
     if (!current) {
       updateAvailable = false;
@@ -803,7 +801,6 @@ app.post('/api/server/update', (req, res) => {
       }
       pendingRestart = false;
 
-      // Invalidar caché de versión tras una actualización
       cachedCurrentVersion = null;
       cachedVersionUptime = null;
       updateCheckCache = { data: null, timestamp: 0 };
@@ -1011,6 +1008,31 @@ app.delete('/api/backups/:file', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- routes: chat ----------
+
+app.get('/api/chat', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '100', 10), MAX_CHAT);
+  const messages = loadChat();
+  const slice = messages.slice(-limit);
+  res.json(slice);
+});
+
+app.delete('/api/chat', (req, res) => {
+  saveChat([]);
+  res.json({ ok: true });
+});
+
+app.post('/api/chat/send', (req, res) => {
+  try {
+    const { message } = req.body || {};
+    if (!message || !message.trim()) throw new Error('Mensaje vacío.');
+    sendConsoleCommand(`say ${message.trim()}`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---------- routes: addons ----------
 
 app.get('/api/addons', (req, res) => {
@@ -1057,11 +1079,6 @@ app.get('/api/addons', (req, res) => {
   });
 });
 
-
-// -----------------------------------------------------------------
-// Extracción recursiva de zips anidados (.mcaddon → .mcpack → ...)
-// -----------------------------------------------------------------
-
 const MAX_NESTED_DEPTH = 6;
 
 async function extractNestedZips(rootDir, depth = 0) {
@@ -1093,7 +1110,6 @@ async function extractNestedZips(rootDir, depth = 0) {
 
     if (!isZipLike) continue;
 
-    // Extraer en una carpeta hermana con nombre único
     const baseName = path.basename(entry.name, path.extname(entry.name));
     const extractDir = path.join(
       rootDir,
@@ -1102,20 +1118,17 @@ async function extractNestedZips(rootDir, depth = 0) {
 
     try {
       const nestedZip = new AdmZip(fullPath);
-      nestedZip.getEntries(); // valida que es un zip real (lanza si no lo es)
+      nestedZip.getEntries();
       await fsp.mkdir(extractDir, { recursive: true });
       nestedZip.extractAllTo(extractDir, true);
-      await fsp.unlink(fullPath); // borrar el .mcpack original ya extraído
+      await fsp.unlink(fullPath);
       await extractNestedZips(extractDir, depth + 1);
     } catch (e) {
-      // No era un zip válido — limpiamos y dejamos el archivo como está
       await rmrf(extractDir).catch(() => {});
     }
   }
 }
 
-// Devuelve todos los directorios que contienen un manifest.json,
-// sin descender más allá de un manifest ya encontrado (un pack es un árbol).
 function findManifestDirs(rootDir) {
   const result = [];
 
@@ -1130,7 +1143,7 @@ function findManifestDirs(rootDir) {
     const hasManifest = entries.some((e) => e.isFile() && e.name === 'manifest.json');
     if (hasManifest) {
       result.push(dir);
-      return; // no descendemos más: ya es un pack
+      return;
     }
 
     for (const e of entries) {
@@ -1144,7 +1157,6 @@ function findManifestDirs(rootDir) {
   return result;
 }
 
-
 app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
   withLock(res, async () => {
     if (!req.file) throw new Error('No se recibió ningún archivo.');
@@ -1155,10 +1167,9 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
     );
     await fsp.mkdir(extractTmp, { recursive: true });
 
-    // 1. Extraer el archivo subido (puede ser .mcaddon, .mcpack o .zip)
     try {
       const outerZip = new AdmZip(uploadedPath);
-      outerZip.getEntries(); // valida
+      outerZip.getEntries();
       outerZip.extractAllTo(extractTmp, true);
     } catch (e) {
       await rmrf(extractTmp).catch(() => {});
@@ -1167,10 +1178,8 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
     }
     await rmrf(uploadedPath).catch(() => {});
 
-    // 2. Extraer recursivamente .mcpack / .mcaddon / .zip que haya dentro
     await extractNestedZips(extractTmp, 0);
 
-    // 3. Buscar TODOS los manifest.json en el árbol resultante
     const manifestDirs = findManifestDirs(extractTmp);
 
     if (manifestDirs.length === 0) {
@@ -1183,7 +1192,6 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
     const installed = [];
     const skipped = [];
 
-    // Ordenar: primero resources, luego behavior (por dependencias cruzadas)
     const ordered = [...manifestDirs].sort((a, b) => {
       const ma = readManifest(a);
       const mb = readManifest(b);
@@ -1195,45 +1203,31 @@ app.post('/api/addons/upload', upload.single('addonfile'), (req, res) => {
       const manifest = readManifest(dir);
 
       if (!manifest) {
-        skipped.push({
-          dir: path.relative(extractTmp, dir) || '.',
-          reason: 'manifest.json ilegible',
-        });
+        skipped.push({ dir: path.relative(extractTmp, dir) || '.', reason: 'manifest.json ilegible' });
         continue;
       }
       if (!manifest.uuid) {
-        skipped.push({
-          dir: path.relative(extractTmp, dir) || '.',
-          reason: 'falta header.uuid',
-        });
+        skipped.push({ dir: path.relative(extractTmp, dir) || '.', reason: 'falta header.uuid' });
         continue;
       }
 
-      const targetBase =
-        manifest.type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
+      const targetBase = manifest.type === 'behavior' ? BEHAVIOR_PACKS_DIR : RESOURCE_PACKS_DIR;
       const folderName = `${manifest.name.replace(/[^a-z0-9_\-]/gi, '_')}-${manifest.uuid}`;
       const targetDir = path.join(targetBase, folderName);
 
       try {
         await rmrf(targetDir);
-        // cp en lugar de rename para evitar EXDEV entre /tmp (tmpfs) y el disco
         await fsp.cp(dir, targetDir, { recursive: true, force: true });
         await rmrf(dir);
       } catch (e) {
         skipped.push({
           dir: path.relative(extractTmp, dir) || '.',
-          reason: `no se pudo mover a ${
-            manifest.type === 'behavior' ? 'behavior_packs' : 'resource_packs'
-          }: ${e.message}`,
+          reason: `no se pudo mover a ${manifest.type === 'behavior' ? 'behavior_packs' : 'resource_packs'}: ${e.message}`,
         });
         continue;
       }
 
-      // Aplicar al mundo actual
-      const listFile =
-        manifest.type === 'behavior'
-          ? 'world_behavior_packs.json'
-          : 'world_resource_packs.json';
+      const listFile = manifest.type === 'behavior' ? 'world_behavior_packs.json' : 'world_resource_packs.json';
       try {
         const list = readWorldPackList(listFile);
         const filtered = list.filter((p) => p.pack_id !== manifest.uuid);
@@ -1353,7 +1347,6 @@ app.get('/api/addons/icon', (req, res) => {
     type === 'behavior' ? 'behavior_packs' : 'resource_packs'
   );
 
-  // Buscar primero en la ubicación declarada, luego en la otra como fallback
   const candidates = location === 'world'
     ? [path.join(baseWorld, safeFolder, 'pack_icon.png'), path.join(baseGlobal, safeFolder, 'pack_icon.png')]
     : [path.join(baseGlobal, safeFolder, 'pack_icon.png'), path.join(baseWorld, safeFolder, 'pack_icon.png')];
@@ -1362,7 +1355,6 @@ app.get('/api/addons/icon', (req, res) => {
     if (fs.existsSync(iconPath)) return res.sendFile(iconPath);
   }
 
-  // Fallback: SVG con "?" para packs sin icono
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
     <rect width="64" height="64" rx="8" fill="#0d1219" stroke="#2a3546" stroke-width="2"/>
     <text x="32" y="42" font-family="sans-serif" font-size="28" font-weight="700" text-anchor="middle" fill="#4a5568">?</text>
@@ -1486,14 +1478,12 @@ app.get('/api/public/info', (req, res) => {
     const onlinePlayers = getOnlinePlayers();
     const isOnline = !!(proc && proc.pm2_env && proc.pm2_env.status === 'online');
 
-    // Leer packs de AMBAS ubicaciones: globales y dentro del mundo
     const worldPath = getCurrentWorldPath();
     const globalResourcePacks = listInstalledPacks(RESOURCE_PACKS_DIR);
     const globalBehaviorPacks = listInstalledPacks(BEHAVIOR_PACKS_DIR);
     const worldResourcePacks = listInstalledPacks(path.join(worldPath, 'resource_packs'));
     const worldBehaviorPacks = listInstalledPacks(path.join(worldPath, 'behavior_packs'));
 
-    // Leer qué packs están aplicados al mundo actual
     const appliedResources = readWorldPackList('world_resource_packs.json');
     const appliedBehaviors = readWorldPackList('world_behavior_packs.json');
     const appliedResourceUuids = new Set(appliedResources.map((p) => p.pack_id));
@@ -1508,7 +1498,6 @@ app.get('/api/public/info', (req, res) => {
       broken: !!p.broken,
     });
 
-    // Solo mostrar los que están aplicados al mundo (activos)
     const resourcePacks = [
       ...globalResourcePacks.map((p) => ({ ...p, location: 'global' })),
       ...worldResourcePacks.map((p) => ({ ...p, location: 'world' })),
@@ -1559,7 +1548,6 @@ app.get('/api/public/pack-icon', (req, res) => {
     type === 'behavior' ? 'behavior_packs' : 'resource_packs'
   );
 
-  // Si el cliente nos dice la ubicación, buscamos primero ahí
   const candidates = location === 'world'
     ? [path.join(baseWorld, safeFolder, 'pack_icon.png'), path.join(baseGlobal, safeFolder, 'pack_icon.png')]
     : [path.join(baseGlobal, safeFolder, 'pack_icon.png'), path.join(baseWorld, safeFolder, 'pack_icon.png')];
@@ -1568,7 +1556,6 @@ app.get('/api/public/pack-icon', (req, res) => {
     if (fs.existsSync(iconPath)) return res.sendFile(iconPath);
   }
 
-  // Fallback: SVG con "?" para packs sin icono
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
     <rect width="64" height="64" rx="8" fill="#0d1219" stroke="#2a3546" stroke-width="2"/>
     <text x="32" y="42" font-family="sans-serif" font-size="28" font-weight="700" text-anchor="middle" fill="#4a5568">?</text>
@@ -1606,7 +1593,6 @@ async function runAutoBackup() {
     const stats = fs.statSync(destPath);
     console.log(`[auto-backup] Backup creado: ${destName} (${(stats.size / 1024 / 1024).toFixed(1)} MB)`);
 
-    // Limpiar backups automáticos antiguos, manteniendo los N más recientes
     const autoBackups = fs
       .readdirSync(BACKUPS_DIR)
       .filter((f) => f.startsWith(AUTO_BACKUP_PREFIX) && f.endsWith('.zip'))
@@ -1633,8 +1619,8 @@ async function runAutoBackup() {
 function scheduleAutoBackup() {
   const now = new Date();
   const next = new Date();
-  next.setHours(0, 0, 0, 0); // hoy a medianoche
-  if (next <= now) next.setDate(next.getDate() + 1); // ya pasó, programar mañana
+  next.setHours(0, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
 
   const msUntilMidnight = next - now;
   const mins = Math.round(msUntilMidnight / 1000 / 60);
@@ -1642,13 +1628,12 @@ function scheduleAutoBackup() {
 
   setTimeout(async () => {
     await runAutoBackup();
-    scheduleAutoBackup(); // reprogramar para la siguiente medianoche
+    scheduleAutoBackup();
   }, msUntilMidnight);
 }
 
 scheduleAutoBackup();
 
-// Endpoint para probar el backup automático ahora mismo
 app.post('/api/backups/run-auto-now', async (req, res) => {
   if (busy) {
     return res.status(409).json({ error: 'Otra operación está en curso, espera a que termine.' });
