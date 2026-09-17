@@ -8,6 +8,7 @@
   --red: #f0576b;
   --blue: #4f8cff;
   --orange: #ffa94d;
+  --discord: #5865F2;
   --radius: 12px;
 }
 
@@ -44,7 +45,10 @@ body {
 }
 
 .brand-icon {
-  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--orange);
   flex-shrink: 0;
 }
 
@@ -130,6 +134,18 @@ body {
   text-align: center;
 }
 
+/* Icons */
+.icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+.icon-lg { width: 20px; height: 20px; }
+.icon-xl { width: 28px; height: 28px; }
+.icon-inline { width: 18px; height: 18px; }
+
 /* Hero */
 .hero {
   background: linear-gradient(135deg, #1a2230 0%, #1f2a3d 100%);
@@ -178,25 +194,46 @@ body {
 }
 
 .copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
+  color: var(--muted);
   cursor: pointer;
-  font-size: 16px;
   padding: 4px;
-  border-radius: 4px;
-  opacity: 0.7;
-  transition: opacity 0.15s, background 0.15s;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
   flex-shrink: 0;
 }
 
 .copy-btn:hover {
-  opacity: 1;
+  color: var(--text);
   background: rgba(255,255,255,0.06);
 }
 
 .copy-btn.copied {
   color: var(--green);
-  opacity: 1;
+}
+
+/* Botón Discord */
+.btn-discord {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--discord);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.15s, transform 0.15s;
+  margin-top: 8px;
+}
+.btn-discord:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 /* Status details */
@@ -234,6 +271,15 @@ body {
   margin: 6px 0 0;
 }
 
+/* Versión */
+.version-value {
+  font-family: 'SF Mono', Consolas, monospace;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--blue);
+  padding: 8px 0;
+}
+
 /* Listas */
 .list {
   display: flex;
@@ -266,9 +312,14 @@ body {
 }
 
 .list-item .player-name::before {
-  content: '🟢';
-  font-size: 10px;
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
   flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(62,207,142,0.6);
 }
 
 /* Packs */
@@ -349,9 +400,7 @@ body {
   font-size: 12px;
 }
 
-/* ============================================================
-   Lista pública de usuarios
-   ============================================================ */
+/* Lista pública de usuarios */
 .players-public-list {
   display: flex;
   flex-direction: column;
@@ -445,5 +494,6 @@ body {
   .card h2 { font-size: 15px; }
   .connect-value code { font-size: 13px; }
   .uptime-value { font-size: 18px; }
+  .version-value { font-size: 20px; }
   .pack-icon { width: 32px; height: 32px; }
 }

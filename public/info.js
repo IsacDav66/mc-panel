@@ -50,6 +50,44 @@ async function api(path) {
   return data;
 }
 
+// ---------- Copiar al portapapeles con fallback para HTTP ----------
+function copyToClipboard(text) {
+  // Método moderno (solo funciona en HTTPS o localhost)
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+
+  // Fallback para HTTP
+  return new Promise((resolve, reject) => {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.top = '0';
+      textarea.style.left = '-9999px';
+      textarea.setAttribute('readonly', '');
+      document.body.appendChild(textarea);
+
+      // Seleccionar el contenido
+      textarea.focus();
+      textarea.select();
+
+      // iOS Safari necesita setSelectionRange
+      try {
+        textarea.setSelectionRange(0, textarea.value.length);
+      } catch (e) {}
+
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+
+      if (ok) resolve();
+      else reject(new Error('No se pudo copiar'));
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
 function renderStatus(data) {
   const pill = $('statusPill');
   const details = $('statusDetails');
@@ -84,6 +122,12 @@ function renderStatus(data) {
       uptimeBlock.style.display = 'none';
     }
   }
+}
+
+function renderVersion(data) {
+  const el = $('versionValue');
+  if (!el) return;
+  el.textContent = data.version || 'Desconocida';
 }
 
 function renderPlayers(data) {
@@ -199,6 +243,7 @@ async function refresh() {
     if (portEl) portEl.textContent = data.port;
 
     renderStatus(data);
+    renderVersion(data);
     renderPlayers(data);
     renderPacks(data);
     renderAllPlayers(data);
@@ -224,14 +269,20 @@ document.addEventListener('click', async (e) => {
 
   const text = target.textContent.trim();
   try {
-    await navigator.clipboard.writeText(text);
-    const original = btn.textContent;
-    btn.textContent = '✅';
+    await copyToClipboard(text);
     btn.classList.add('copied');
-    setTimeout(() => {
-      btn.textContent = original;
-      btn.classList.remove('copied');
-    }, 1200);
+    // Cambiar el icono a check temporalmente
+    const use = btn.querySelector('use');
+    if (use) {
+      const original = use.getAttribute('href');
+      use.setAttribute('href', '#i-check');
+      setTimeout(() => {
+        use.setAttribute('href', original);
+        btn.classList.remove('copied');
+      }, 1200);
+    } else {
+      setTimeout(() => btn.classList.remove('copied'), 1200);
+    }
   } catch (err) {
     alert('No se pudo copiar: ' + err.message);
   }

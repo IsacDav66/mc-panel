@@ -1665,7 +1665,6 @@ app.get('/api/public/info', (req, res) => {
       .filter((p) => !p.builtIn && p.uuid && appliedBehaviorUuids.has(p.uuid))
       .map((p) => mapPack(p, p.location));
 
-    // Lista de jugadores (solo datos públicos: nombre, fechas, online)
     const allPlayers = Object.values(loadPlayers())
       .map((p) => ({
         name: p.name,
@@ -1678,6 +1677,13 @@ app.get('/api/public/info', (req, res) => {
         return new Date(b.lastSeen || 0) - new Date(a.lastSeen || 0);
       });
 
+    let version = null;
+    try {
+      version = getCurrentBedrockVersion();
+    } catch (e) {
+      console.warn('[public/info] No se pudo leer la versión:', e.message);
+    }
+
     const host = process.env.PUBLIC_SERVER_ADDRESS || req.hostname || 'localhost';
     const port = (props['server-port'] || '19132').trim();
 
@@ -1688,6 +1694,7 @@ app.get('/api/public/info', (req, res) => {
       gamemode: (props['gamemode'] || 'survival').trim(),
       difficulty: (props['difficulty'] || 'normal').trim(),
       maxPlayers: parseInt(props['max-players'] || '10', 10) || 10,
+      version,
       address: host,
       port,
       uptimeMs: isOnline && proc.pm2_env.pm_uptime ? Date.now() - proc.pm2_env.pm_uptime : null,
