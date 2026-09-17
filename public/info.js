@@ -52,12 +52,10 @@ async function api(path) {
 
 // ---------- Copiar al portapapeles con fallback para HTTP ----------
 function copyToClipboard(text) {
-  // Método moderno (solo funciona en HTTPS o localhost)
   if (navigator.clipboard && window.isSecureContext) {
     return navigator.clipboard.writeText(text);
   }
 
-  // Fallback para HTTP
   return new Promise((resolve, reject) => {
     try {
       const textarea = document.createElement('textarea');
@@ -68,14 +66,9 @@ function copyToClipboard(text) {
       textarea.setAttribute('readonly', '');
       document.body.appendChild(textarea);
 
-      // Seleccionar el contenido
       textarea.focus();
       textarea.select();
-
-      // iOS Safari necesita setSelectionRange
-      try {
-        textarea.setSelectionRange(0, textarea.value.length);
-      } catch (e) {}
+      try { textarea.setSelectionRange(0, textarea.value.length); } catch (e) {}
 
       const ok = document.execCommand('copy');
       document.body.removeChild(textarea);
@@ -88,6 +81,27 @@ function copyToClipboard(text) {
   });
 }
 
+// ---------- Estado global ----------
+let lastInfoData = null;
+const COLLAPSE_LIMIT = 5;
+const listState = {
+  players: false,
+  resources: false,
+  behavior: false,
+};
+
+function buildToggleButton(type, total, expanded) {
+  if (total <= COLLAPSE_LIMIT) return '';
+  const hidden = total - COLLAPSE_LIMIT;
+  const label = expanded ? 'Mostrar menos' : `Mostrar más (${hidden})`;
+  const iconId = expanded ? 'i-chevron-up' : 'i-chevron-down';
+  return `<button type="button" class="btn-toggle-list" data-toggle-list="${type}">
+    <span>${label}</span>
+    <svg class="icon"><use href="#${iconId}"/></svg>
+  </button>`;
+}
+
+// ---------- Renders ----------
 function renderStatus(data) {
   const pill = $('statusPill');
   const details = $('statusDetails');
@@ -152,31 +166,26 @@ function renderAllPlayers(data) {
   if (badge) badge.textContent = data.playersTotalCount || 0;
   if (!container) return;
 
-  const players = data.players || [];
-  if (players.length === 0) {
+  const all = data.players || [];
+  if (all.length === 0) {
     container.innerHTML = '<p class="muted">Todavía nadie se ha conectado.</p>';
     return;
   }
 
+  const expanded = listState.players;
+  const shown = expanded ? all : all.slice(0, COLLAPSE_LIMIT);
+
   const fmtDate = (iso) => {
     if (!iso) return '—';
-    try {
-      return new Date(iso).toLocaleDateString();
-    } catch (e) {
-      return '—';
-    }
+    try { return new Date(iso).toLocaleDateString(); } catch (e) { return '—'; }
   };
 
   const fmtDateTime = (iso) => {
     if (!iso) return '—';
-    try {
-      return new Date(iso).toLocaleString();
-    } catch (e) {
-      return '—';
-    }
+    try { return new Date(iso).toLocaleString(); } catch (e) { return '—'; }
   };
 
-  container.innerHTML = players
+  const rows = shown
     .map((p) => {
       const onlineTag = p.online
         ? '<span class="tag tag-online">En línea</span>'
@@ -192,6 +201,8 @@ function renderAllPlayers(data) {
         </div>`;
     })
     .join('');
+
+  container.innerHTML = rows + buildToggleButton('players', all.length, expanded);
 }
 
 function renderPacks(data) {
@@ -203,9 +214,17 @@ function renderPacks(data) {
   if (resBadge) resBadge.textContent = data.resourcePacks.length;
   if (behBadge) behBadge.textContent = data.behaviorPacks.length;
 
-  const renderList = (list, type) => {
-    if (list.length === 0) return '<p class="muted">Ninguno instalado.</p>';
-    return list
+  const renderList = (list, type, container, stateKey) => {
+    if (!container) return;
+    if (list.length === 0) {
+      container.innerHTML = '<p class="muted">Ninguno instalado.</p>';
+      return;
+    }
+
+    const expanded = listState[stateKey];
+    const shown = expanded ? list : list.slice(0, COLLAPSE_LIMIT);
+
+    const items = shown
       .map((p) => {
         const icon = `api/public/pack-icon?type=${type}&folder=${encodeURIComponent(p.folder)}&location=${encodeURIComponent(p.location || 'global')}`;
         const brokenTag = p.broken ? '<span class="tag tag-broken">Roto</span>' : '';
@@ -220,15 +239,26 @@ function renderPacks(data) {
           </div>`;
       })
       .join('');
+
+    container.innerHTML = items + buildToggleButton(stateKey, list.length, expanded);
   };
 
-  if (resContainer) resContainer.innerHTML = renderList(data.resourcePacks, 'resources');
-  if (behContainer) behContainer.innerHTML = renderList(data.behaviorPacks, 'behavior');
+  renderList(data.resourcePacks, 'resources', resContainer, 'resources');
+  renderList(data.behaviorPacks, 'behavior', behContainer, 'behavior');
+}
+
+function renderAll(data) {
+  renderStatus(data);
+  renderVersion(data);
+  renderPlayers(data);
+  renderPacks(data);
+  renderAllPlayers(data);
 }
 
 async function refresh() {
   try {
     const data = await api('api/public/info');
+    lastInfoData = data;
 
     const nameEl = $('serverName');
     if (nameEl) nameEl.textContent = data.serverName;
@@ -242,11 +272,7 @@ async function refresh() {
     const portEl = $('serverPort');
     if (portEl) portEl.textContent = data.port;
 
-    renderStatus(data);
-    renderVersion(data);
-    renderPlayers(data);
-    renderPacks(data);
-    renderAllPlayers(data);
+    renderAll(data);
   } catch (e) {
     const pill = $('statusPill');
     if (pill) {
@@ -258,7 +284,20 @@ async function refresh() {
   }
 }
 
+// ---------- Listeners ----------
 document.addEventListener('click', async (e) => {
+  // Toggle de listas colapsables
+  const toggleBtn = e.target.closest('[data-toggle-list]');
+  if (toggleBtn) {
+    const type = toggleBtn.dataset.toggleList;
+    if (type in listState) {
+      listState[type] = !listState[type];
+      if (lastInfoData) renderAll(lastInfoData);
+    }
+    return;
+  }
+
+  // Botones de copiar
   const btn = e.target.closest('.copy-btn');
   if (!btn) return;
   e.preventDefault();
@@ -271,7 +310,6 @@ document.addEventListener('click', async (e) => {
   try {
     await copyToClipboard(text);
     btn.classList.add('copied');
-    // Cambiar el icono a check temporalmente
     const use = btn.querySelector('use');
     if (use) {
       const original = use.getAttribute('href');

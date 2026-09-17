@@ -452,6 +452,43 @@ body {
   flex-shrink: 0;
 }
 
+/* ============================================================
+   Botón "Mostrar más / Mostrar menos"
+   ============================================================ */
+.btn-toggle-list {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 12px;
+  margin-top: 4px;
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed var(--panel-border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  font-family: inherit;
+}
+
+.btn-toggle-list:hover {
+  background: rgba(79,140,255,0.08);
+  color: var(--blue);
+  border-color: rgba(79,140,255,0.35);
+}
+
+.btn-toggle-list:active {
+  transform: scale(0.99);
+}
+
+.btn-toggle-list .icon {
+  width: 14px;
+  height: 14px;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
