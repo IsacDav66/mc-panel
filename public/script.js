@@ -690,68 +690,6 @@ on('formConsoleSend', 'submit', async (e) => {
   }
 });
 
-// ============================================================
-//  Chat en vivo
-// ============================================================
-async function loadChat() {
-  const container = $('chatList');
-  const countEl = $('chatCount');
-  if (!container) return;
-  try {
-    const messages = await api('api/chat?limit=100');
-    if (countEl) countEl.textContent = messages.length;
-    if (messages.length === 0) {
-      container.innerHTML = '<p class="muted">Todavía no hay mensajes.</p>';
-      return;
-    }
-    const wasAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 20;
-    container.innerHTML = messages
-      .map((m) => {
-        const time = new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        return `
-          <div class="chat-message">
-            <span class="chat-time">${time}</span>
-            <span class="chat-name">${escapeHtml(m.name)}</span>
-            <span class="chat-text">${escapeHtml(m.message)}</span>
-          </div>`;
-      })
-      .join('');
-    if (wasAtBottom || container.scrollTop === 0) {
-      container.scrollTop = container.scrollHeight;
-    }
-  } catch (e) {
-    container.textContent = e.message;
-  }
-}
-
-on('formChatSend', 'submit', async (e) => {
-  e.preventDefault();
-  const input = $('chatInput');
-  if (!input) return;
-  const message = input.value.trim();
-  if (!message) return;
-  input.value = '';
-  try {
-    await api('api/chat/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
-    });
-    setTimeout(loadChat, 800);
-  } catch (err) {
-    alert(err.message);
-  }
-});
-
-on('btnClearChat', 'click', async () => {
-  if (!confirm('¿Borrar todos los mensajes del chat en el panel? (No afecta al juego)')) return;
-  try {
-    await api('api/chat', { method: 'DELETE' });
-    loadChat();
-  } catch (err) {
-    alert(err.message);
-  }
-});
 
 // ============================================================
 //  Skin 3D viewer
