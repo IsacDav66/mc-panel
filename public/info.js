@@ -102,6 +102,54 @@ function renderPlayers(data) {
     .join('');
 }
 
+function renderAllPlayers(data) {
+  const container = $('allPlayersList');
+  const badge = $('playersTotalBadge');
+  if (badge) badge.textContent = data.playersTotalCount || 0;
+  if (!container) return;
+
+  const players = data.players || [];
+  if (players.length === 0) {
+    container.innerHTML = '<p class="muted">Todavía nadie se ha conectado.</p>';
+    return;
+  }
+
+  const fmtDate = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleDateString();
+    } catch (e) {
+      return '—';
+    }
+  };
+
+  const fmtDateTime = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString();
+    } catch (e) {
+      return '—';
+    }
+  };
+
+  container.innerHTML = players
+    .map((p) => {
+      const onlineTag = p.online
+        ? '<span class="tag tag-online">En línea</span>'
+        : '';
+      return `
+        <div class="player-public-row">
+          <div class="player-public-name">
+            ${onlineTag}
+            <span>${escapeHtml(p.name)}</span>
+          </div>
+          <div class="player-public-meta" data-label="Primera vez">${escapeHtml(fmtDate(p.firstSeen))}</div>
+          <div class="player-public-meta" data-label="Última vez">${escapeHtml(fmtDateTime(p.lastSeen))}</div>
+        </div>`;
+    })
+    .join('');
+}
+
 function renderPacks(data) {
   const resContainer = $('resourcePacksList');
   const behContainer = $('behaviorPacksList');
@@ -120,7 +168,7 @@ function renderPacks(data) {
         const desc = p.description ? escapeHtml(p.description) : '';
         return `
           <div class="pack-item">
-            <img class="pack-icon" src="${icon}" onerror="this.style.visibility='hidden'" alt="" />
+            <img class="pack-icon" src="${icon}" alt="" onerror="this.style.visibility='hidden'" />
             <div class="pack-info">
               <div class="pack-name">${escapeHtml(p.name)} ${brokenTag}</div>
               <div class="meta">v${escapeHtml(versionText(p.version))}${desc ? ' · ' + desc : ''}</div>
@@ -153,6 +201,7 @@ async function refresh() {
     renderStatus(data);
     renderPlayers(data);
     renderPacks(data);
+    renderAllPlayers(data);
   } catch (e) {
     const pill = $('statusPill');
     if (pill) {

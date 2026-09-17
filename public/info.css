@@ -349,6 +349,60 @@ body {
   font-size: 12px;
 }
 
+/* ============================================================
+   Lista pública de usuarios
+   ============================================================ */
+.players-public-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.player-public-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 12px;
+  align-items: center;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.player-public-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.player-public-meta {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-online {
+  background: rgba(62,207,142,0.15);
+  color: var(--green);
+  margin-left: 0;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
@@ -363,6 +417,26 @@ body {
   .topbar h1 { font-size: 18px; }
   .card { padding: 16px; }
   .pill { padding: 4px 10px; font-size: 12px; }
+}
+
+@media (max-width: 640px) {
+  .player-public-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .player-public-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .player-public-meta::before {
+    content: attr(data-label);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
 }
 
 @media (max-width: 480px) {

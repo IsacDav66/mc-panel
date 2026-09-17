@@ -195,7 +195,6 @@ async function zipDirToFile(sourceDir, destZipPath, onProgress, ignore = []) {
     output.on('error', reject);
     archive.on('error', reject);
 
-    // Ignorar entradas no soportadas (FIFOs, sockets, etc.) sin abortar
     archive.on('warning', (err) => {
       if (err.code === 'ENOENT') return;
       if (err.code !== 'ENTRYNOTSUPPORTED') {
@@ -530,8 +529,6 @@ function pollServerLog() {
   const connectRe = /Player connected:\s*([^,]+),\s*xuid:\s*(\d+)/i;
   const disconnectRe = /Player disconnected:\s*([^,]+),\s*xuid:\s*(\d+)/i;
   const serverStartRe = /Server started\./i;
-  const chatRe = /<\s*([^>\n]{1,50}?)\s*>\s*(.+)$/;
-  const serverMsgRe = /\[Server\]\s*(.+)$/;
 
   for (const line of lines) {
     if (serverStartRe.test(line)) {
@@ -557,16 +554,6 @@ function pollServerLog() {
       onlineSet.delete(xuid);
       touchPlayer(name, xuid, false);
       appendEvent({ type: 'leave', name, xuid, timestamp: new Date().toISOString() });
-    } else if (line.includes('INFO]')) {
-      let m;
-      if ((m = line.match(chatRe))) {
-        const chatName = cleanText(m[1]);
-        const chatMsg = cleanText(m[2]);
-        if (chatName && chatMsg) appendChat(chatName, chatMsg);
-      } else if ((m = line.match(serverMsgRe))) {
-        const chatMsg = cleanText(m[1]);
-        if (chatMsg) appendChat('Server', chatMsg);
-      }
     }
   }
 }
@@ -860,7 +847,6 @@ app.post('/api/server/update', (req, res) => {
       const zip = new AdmZip(zipPath);
       zip.extractAllTo(extractDir, true);
 
-      // Permisos de ejecución del binario recién extraído (AdmZip no los preserva)
       try {
         fs.chmodSync(path.join(extractDir, 'bedrock_server'), 0o755);
       } catch (e) {
@@ -891,7 +877,6 @@ app.post('/api/server/update', (req, res) => {
       const preserveTmp = path.join(updateTmpDir, 'preserve');
       await fsp.mkdir(preserveTmp, { recursive: true });
 
-      // 1. Mover todo lo que queremos preservar a la carpeta temporal
       for (const item of preserve) {
         const src = path.join(BEDROCK_DIR, item);
         if (fs.existsSync(src)) {
@@ -899,17 +884,14 @@ app.post('/api/server/update', (req, res) => {
         }
       }
 
-      // 2. Borrar el resto de archivos del servidor (excepto panel-backups y panel-data)
       const entries = await fsp.readdir(BEDROCK_DIR);
       for (const entry of entries) {
         if (entry === 'panel-backups' || entry === 'panel-data') continue;
         await rmrf(path.join(BEDROCK_DIR, entry));
       }
 
-      // 3. Copiar los archivos nuevos del ZIP a BEDROCK_DIR
       await fsp.cp(extractDir, BEDROCK_DIR, { recursive: true });
 
-      // 4. Restaurar lo preservado: borrar el destino primero si existe
       for (const item of preserve) {
         const src = path.join(preserveTmp, item);
         if (!fs.existsSync(src)) continue;
@@ -925,7 +907,6 @@ app.post('/api/server/update', (req, res) => {
       job.meta.step = 7;
       job.meta.progress = 85;
       job.meta.message = 'Restaurando permisos de ejecución…';
-      // Asegurar permisos de ejecución tras la restauración
       try {
         fs.chmodSync(path.join(BEDROCK_DIR, 'bedrock_server'), 0o755);
       } catch (e) {
@@ -1684,6 +1665,19 @@ app.get('/api/public/info', (req, res) => {
       .filter((p) => !p.builtIn && p.uuid && appliedBehaviorUuids.has(p.uuid))
       .map((p) => mapPack(p, p.location));
 
+    // Lista de jugadores (solo datos públicos: nombre, fechas, online)
+    const allPlayers = Object.values(loadPlayers())
+      .map((p) => ({
+        name: p.name,
+        firstSeen: p.firstSeen || null,
+        lastSeen: p.lastSeen || null,
+        online: onlineSet.has(p.xuid),
+      }))
+      .sort((a, b) => {
+        if (a.online !== b.online) return a.online ? -1 : 1;
+        return new Date(b.lastSeen || 0) - new Date(a.lastSeen || 0);
+      });
+
     const host = process.env.PUBLIC_SERVER_ADDRESS || req.hostname || 'localhost';
     const port = (props['server-port'] || '19132').trim();
 
@@ -1699,6 +1693,8 @@ app.get('/api/public/info', (req, res) => {
       uptimeMs: isOnline && proc.pm2_env.pm_uptime ? Date.now() - proc.pm2_env.pm_uptime : null,
       playersOnline: onlinePlayers.map((p) => ({ name: p.name })),
       playersOnlineCount: onlinePlayers.length,
+      players: allPlayers,
+      playersTotalCount: allPlayers.length,
       lastActivity: getLastActivity(),
       resourcePacks,
       behaviorPacks,
