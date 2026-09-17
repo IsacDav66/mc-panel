@@ -421,10 +421,9 @@ async function applyUpdate() {
 
     if (!result.ok) throw new Error(result.error || 'No se pudo iniciar la actualización.');
 
-    showJobModal({ id: result.jobId, status: 'running', meta: { message: 'Iniciando…', progress: 0, step: 1, totalSteps: 8 } });
+    showJobModal({ id: result.jobId, status: 'running', meta: { message: 'Iniciando…', progress: 0, step: 1, totalSteps: 9 } });
     startJobPolling();
   } catch (err) {
-    // Podría ser 409 (ya hay uno en curso) — intentamos seguir el job en curso
     if (err.message?.includes('en curso') || err.message?.includes('curso')) {
       startJobPolling();
     } else {
@@ -690,7 +689,6 @@ on('formConsoleSend', 'submit', async (e) => {
   }
 });
 
-
 // ============================================================
 //  Skin 3D viewer
 // ============================================================
@@ -915,7 +913,6 @@ loadBackups();
 loadAddons();
 refreshConsole();
 loadPlayers();
-loadChat();
 
 // Recuperar job en curso si existe
 resumeCurrentJob();
@@ -926,4 +923,3 @@ autoUpdateCheckInterval = setInterval(() => checkForUpdates(false), 30 * 60 * 10
 setInterval(refreshStatus, 8000);
 setInterval(refreshConsole, 5000);
 setInterval(loadPlayers, 15000);
-setInterval(loadChat, 5000);
